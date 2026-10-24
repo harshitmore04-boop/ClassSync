@@ -1,10 +1,11 @@
+import {proxyRequest} from '../../lib/trusted-proxy';
 import {env} from 'cloudflare:workers';
 import {getAccountUser,cookieToken,sessionCookie,createSession,passwordHash,digest,randomToken,equal,reserveAuthAttempt} from '../../lib/accounts';
 export const dynamic='force-dynamic';
 const reply=(body:any,status=200,cookie?:string)=>Response.json(body,{status,headers:{'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})}});
-export async function GET(request:Request){try{const user=await getAccountUser(request);return reply({user:user?{email:user.email,name:user.displayName,role:user.role}:null,teacherSetupAvailable:!await env.DB!.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()});}catch{return reply({error:'Account service unavailable.'},503)}}
+export async function GET(request:Request){try{request=await proxyRequest(request);const user=await getAccountUser(request);return reply({user:user?{email:user.email,name:user.displayName,role:user.role}:null,teacherSetupAvailable:!await env.DB!.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()});}catch(error){console.error('ClassSync account service error:',error instanceof Error?error.message:'unknown');return reply({error:'Account service unavailable.'},503)}}
 export async function POST(request:Request){
- try{
+ try{request=await proxyRequest(request);
   if(request.headers.get('origin')!==new URL(request.url).origin)return reply({error:'Request origin rejected.'},403);
   const raw=await request.text();if(raw.length>6000)return reply({error:'Request too large.'},413);
   let b:any;try{b=JSON.parse(raw)}catch{return reply({error:'Send valid account details.'},400)}
