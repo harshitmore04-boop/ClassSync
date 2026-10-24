@@ -1,0 +1,1 @@
+{"private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"postgres":"3.4.7"},"devDependencies":{"esbuild":"0.25.12"}}
