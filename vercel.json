@@ -1,0 +1,10 @@
+{
+ "version":2,
+ "framework":null,
+ "buildCommand":"",
+ "installCommand":"",
+ "outputDirectory":"public",
+ "cleanUrls":true,
+ "functions":{"api/proxy.js":{"maxDuration":30}},
+ "rewrites":[{"source":"/","destination":"/login.html"},{"source":"/api/:path*","destination":"/api/proxy?endpoint=:path*"}]
+}
