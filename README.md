@@ -1,64 +1,25 @@
 # ClassSync
 
-Hybrid Attendance Tracking and Personalized Recovery Planning: student and teacher portals, daily attendance, direct QR and face scanning, recovery calculations, missed-topic tasks and messages.
+Hybrid Attendance Tracking and Personalized Recovery Planning.
 
-## Run with real local accounts
+Live application: https://classsync-tau.vercel.app/login
 
-Use Node.js 22.13 or newer. In this folder:
+## Production architecture
 
-```sh
-npm install --prefix local-server
-node serve-local.mjs
-```
+The interface and all five application API routes run on Vercel. Records are stored in the private `classsync` schema in Supabase Postgres. The application no longer proxies API requests to another website. Vercel Authentication is enabled.
 
-Open http://localhost:8080/login. First-time teacher setup requires the private code printed in your terminal. Choose your own email/password. Teachers create students, then use **Create / reset login** to share an activation link. Sign out or Switch portal to enter the other role.
+`server/` contains the native Vercel handler, database adapter and schema. `api/proxy.js` is the bundled native handler (the filename is retained for existing routes). Rebuild from the project root with `npm ci --prefix server` followed by `node server/build.mjs`.
 
-Your local database and setup code are in ignored `.local/`. Never upload them. The local launcher binds to localhost and is for one computer. For phone QR check-in, use the hosted site, not a localhost link.
+## Configuration
 
-## Sample-only demo
+Set `DATABASE_URL` to the scoped application-role Supabase connection string in Vercel. `CLASS_SYNC_TEACHER_SETUP_HASH` protects first-teacher setup; the private setup code is stored in the owner's Vercel environment. Never commit environment values.
 
-```sh
-node serve-demo.mjs
-```
+Optional Supabase email codes use `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_OTP_ENABLED`. Email codes remain disabled until custom SMTP and code email templates are configured and tested. Password accounts remain available. Optional teacher email notifications use `BREVO_API_KEY` and `MAIL_FROM_EMAIL`.
 
-Open http://localhost:8080/login and choose a demo. The demo uses browser localStorage and does not submit live email or enforce a real public-IP comparison. The demo student is Harshit. Teacher/student demo changes share the same browser and origin; different devices do not share that storage. Real account forms require `serve-local.mjs` or the hosted backend.
+## Features
 
-## Scanners
+Student and teacher portals, QR attendance, teacher approvals, face enrollment with motion challenges, PDF/class-list uploads, manual registration, attendance recovery plans and messages. Registration is in Face enrollment. Webcam motion checks are assistance rather than certified anti-spoof detection. All face submissions require teacher approval.
 
-## QR attendance choices
+## Development
 
-The teacher can choose three modes. New sessions default to **Student login → Teacher approval**.
-
-| Mode | Student action | When attendance is saved |
-| --- | --- | --- |
-| Student login → Teacher approval | Scan, sign in to ClassSync, request attendance | Teacher approves in Approvals |
-| Direct QR · name & roll match | Scan, enter registered name and roll | Matching roster entry immediately; mismatches wait for review |
-| Teacher-assisted confirmation | Teacher scans and selects a student; phone users can sign in and request review | Teacher confirms at scanner or approves request |
-
-Login preserves the scanned class token. Approval requests use the registered identity belonging to the signed-in account, never a posted name or student ID. Students see Pending, Approved or Rejected in their portal. Repeated submissions cannot duplicate attendance. Submitted requests can be reviewed after class closes. Previously created account-confirmation sessions remain supported. The optional matching-IP switch applies to all modes. New demo QR sessions use a separate shared attendance service, so phones can submit name/roll requests and the creating teacher can approve across devices. Other demo features remain in browser storage.
-
-Face mode separates enrollment from scanning. Select Save/enroll, start camera, confirm consent and save the selected student's face. In automatic scan mode a face triggers a randomized motion challenge, then identity matching and attendance. The person must leave view before another scan. No recognition-button click is needed per person. Webcam permission and HTTPS/localhost are required. Physical-camera verification remains device-dependent.
-
-The motion challenge is basic liveness assistance, not certified spoof detection. Replayed video or a modified client may bypass it. Learning completion never changes official attendance. Parent login is absent; teacher parent messages need configured email submission for delivery. Automatic warnings create message records, not automatic outgoing email.
-
-## Hosted backend
-
-The original framework project uses Vinext/Vite, Cloudflare Workers and D1. Real application login now uses email/password accounts and secure sessions, rather than platform sign-in. Hosting must permit anonymous visitors for direct QR/account entry; the API protects private records using application roles. `CLASS_SYNC_TEACHER_SETUP_HASH` is a server-only hash of the private first-teacher code. Optional email uses `BREVO_API_KEY` and `MAIL_FROM_EMAIL`. No live secrets or database are included.
-
-Deploying unchanged to Vercel does not supply Cloudflare D1 bindings. A Vercel port needs a database/runtime adaptation. The full local Node server is a separate way to run the API on your computer.
-
-See `AUTH_AND_SCANNING.md` and `LIVENESS.md` for detailed behavior, boundaries and validation. The explanation guide in the downloadable bundle covers the presentation and COA connection. Third-party libraries/models retain their original terms; license files are included.
-
-### Student face self-enrollment
-Teachers open **Face enrollment** and create a one-hour class QR/link. Registered students open it on their phones, confirm their identity, consent, complete a randomized blink/head-turn check, and capture three poses. Live links require the student's own ClassSync account; shared demos match the demo roster's name and roll. Only numeric descriptors are submitted; camera video and photos are not uploaded.
-
-Submissions remain pending until a teacher verifies identity. Teachers can select pending requests and approve/reject them together. Batch results report individual failures, including duplicate face-profile conflicts. Approved profiles become available to the attendance scanner. Closing an enrollment link blocks new captures but preserves submitted requests for review. Deleting a face revokes its enrollment profile.
-
-Students also have a **Face enrollment** tab with instructions and a field to open their teacher's enrollment link. Recovery analytics is accessible from teacher navigation. Tabs support arrow keys, Home/End, and restoring the selected tab on refresh. The COA connection section has been removed; the existing visual theme is preserved.
-
-This webcam motion check is a project-level liveness check, not certified anti-spoof protection. Test actual camera capture on the target phone/browser before a classroom demonstration. Students can use QR attendance if face enrollment is unavailable.
-
-### Class-list registration and face enrollment
-Teacher → Face enrollment → Register your class supports PDF/CSV/TXT uploads and manual registration. PDF extraction runs in the browser with bundled PDF.js (Apache 2.0); only reviewed rows are sent to the server. Text-based PDFs are supported; scanned/image PDFs require OCR first. Review the extracted list and skipped lines before importing. Lists accept roll numbers alone or roll/name/optional email, up to 500 students. Imports reject duplicate rolls and conflicting identities without partially saving a batch. Existing records and face profiles are retained.
-
-After importing, create a new enrollment QR. Uploaded-list students can enter their registered roll and name without requiring an account invitation. Names provided in the list must match; roll-only students supply a name for teacher verification. The server checks the allowlist before issuing any camera challenge or accepting a face submission. Every face remains pending until teacher approval. This verifies list membership, not proof of identity; teachers must verify who the student is. Existing email/password student accounts and manual registration remain supported. Students registered without an email use the enrollment QR; dashboard accounts still require a real registered email and teacher invitation. PDFs and images are not stored.
+For a single-computer local demonstration: `npm install --prefix local-server`, then `node serve-local.mjs`. Live records are in Supabase; local demonstration data stays on the computer. Third-party assets retain their original licenses.
