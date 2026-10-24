@@ -31,7 +31,7 @@ if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.m
  const server=http.createServer(async(req,res)=>{try{
   const url=new URL(req.url,`http://${req.headers.host}`);if(!['localhost','127.0.0.1'].includes(url.hostname)){res.writeHead(403);res.end('Use localhost.');return;}
   if(!url.pathname.startsWith('/api/')){await serveStatic(req,res);return;}
-  let body='';for await(const chunk of req){body+=chunk.toString();if(Buffer.byteLength(body)>50000){res.writeHead(413);res.end('Request too large.');return;}}
+  let body='';for await(const chunk of req){body+=chunk.toString();if(Buffer.byteLength(body)>160000){res.writeHead(413);res.end('Request too large.');return;}}
   const headers=new Headers();for(const [key,value] of Object.entries(req.headers))if(value)headers.set(key,Array.isArray(value)?value.join(','):value);headers.set('cf-connecting-ip',req.socket.remoteAddress||'127.0.0.1');
   const request=new Request(url,{method:req.method,headers,...(!['GET','HEAD'].includes(req.method)?{body}:{})});const response=await app.dispatch(request);
   if(!response){res.writeHead(404);res.end('API not found.');return;}res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
