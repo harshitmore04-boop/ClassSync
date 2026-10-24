@@ -1,0 +1,17 @@
+/* Shared portal navigation, using the existing ClassSync palette. */
+.portal-header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:20px 24px;padding:22px max(5%,calc((100% - 1215px)/2)) 0;background:var(--bg);border-bottom:1px solid var(--line)}
+.portal-header .brand{white-space:nowrap;min-width:0}
+.portal-header>.tag{display:none}
+.portal-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px}
+.portal-actions [data-switch-portal]{font-size:12px;font-weight:600;text-decoration:none;color:var(--ink);white-space:nowrap}
+.portal-actions .btn{padding:10px 14px;font-size:12px;white-space:nowrap}
+.portal-header nav{grid-column:1/-1;display:flex;flex-wrap:nowrap;align-items:stretch;gap:4px;width:100%;min-width:0;overflow-x:auto;padding:0 0 12px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.portal-header .nav{flex:1 0 auto;display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.2;font-weight:600;white-space:nowrap;transition:background .15s,color .15s}
+.portal-header .nav:hover:not(.active){background:#e7ecdf;color:var(--ink)}
+.portal-header .nav.active{background:var(--ink);color:var(--white)}
+#teacherPendingCount{display:inline-flex;align-items:center;justify-content:center;min-width:21px;height:21px;padding:0 5px;border-radius:20px;background:var(--green);color:var(--ink);font-size:11px}
+@media(max-width:800px){.portal-header{gap:16px;padding:18px 5% 0}.portal-header .brand{font-size:22px}.portal-header .brand span:last-child{display:none}.portal-header .brand span:first-child{display:inline-block}.portal-header .nav{flex:0 0 auto;min-height:44px}.portal-actions{gap:8px}.portal-actions .btn{padding:10px;font-size:11px}.portal-actions [data-switch-portal]{font-size:11px}}
+@media(max-width:430px){.portal-header{column-gap:8px}.portal-header .brand{font-size:19px}.portal-header .brand span:first-child{padding:3px 6px;margin-right:4px}.portal-actions{gap:6px}}
+@media print{.portal-header nav,.portal-actions{display:none}}
+#faceEnrollments .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:800px){#faceEnrollments .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
