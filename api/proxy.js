@@ -2138,6 +2138,7 @@ function compile(query, values2) {
     args.push(values2[Number(n) - 1]);
     return "$" + args.length + (cast || "");
   });
+  out = out.replace(/SET hits=hits\+1/gi, "SET hits=auth_attempts.hits+1");
   out = out.replace(/INSERT OR IGNORE INTO/gi, "INSERT INTO").replace(/\bMIN\(created_at,/gi, "LEAST(created_at,");
   if (/INSERT OR IGNORE INTO/i.test(query)) out += " ON CONFLICT DO NOTHING";
   return { query: out, values: args };
