@@ -1,73 +1,6 @@
 (() => {
-  const role=document.body.dataset.role, form=document.getElementById('accountForm'), status=document.getElementById('status'), elements=form.elements;
-  let registering=false, otpEnabled=false, pendingAccount=null, resendAt=0;
-  const codeForm=document.getElementById('emailCodeForm'), codeButton=document.getElementById('emailCodeLogin'), toggle=document.getElementById('toggleAccount');
-  const query=new URL(location.href).searchParams;
-  let returnTo=role==='student'?'/student':'/teacher';
-  if(role==='student'&&query.has('returnTo')){try{const target=new URL(query.get('returnTo'),location.origin);if(target.pathname==='/attendance.html')returnTo=query.get('returnTo');}catch{}}
-  const continueLink=document.querySelector('.continue[href]');if(continueLink)continueLink.href=returnTo;
-  const demoLink=document.querySelector('.demo-action');
-  if(role==='student'&&returnTo.includes('session')){
-    const target=new URL(returnTo,location.origin);status.textContent='Sign in to continue attendance for the scanned class. The teacher’s selected method determines whether confirmation or approval is required.';
-    if(target.searchParams.get('demo')==='1'){if(demoLink){demoLink.href=returnTo;demoLink.textContent='Continue as demo student ->';}}
-    else{if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use your real student account for this attendance request. Ask the teacher for an activation link if needed.';}
-  }
-  if(role==='student'&&returnTo.startsWith('/face-enroll.html?')){status.textContent='Sign in to enroll your own face for teacher approval.';if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use your real student account to enroll face signatures for approval.';}
-  if(query.has('invite')){document.getElementById('invite').value=query.get('invite');document.getElementById('inviteGroup').hidden=false;}
-  async function request(body){
-    const response=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    let value;try{value=await response.json();}catch{throw Error('Account service is unavailable. Please retry.');}
-    if(!response.ok)throw Error(value.error||'Unable to complete this request.');return value;
-  }
-  function accountDetails(){return {action:registering?'register':'login',role,email:elements.namedItem('email').value.trim(),password:elements.namedItem('password').value};}
-  function render(){document.getElementById('registrationFields').hidden=!registering;document.getElementById('submitButton').textContent=registering?'Create account':'Sign in';document.getElementById('formTitle').textContent=registering?'Create account':'Sign in';toggle.textContent=registering?'Already have an account? Sign in':'Create an account';}
-  function cancelCode(){pendingAccount=null;codeForm.hidden=true;codeForm.reset();form.hidden=false;toggle.hidden=false;}
-  toggle.onclick=()=>{cancelCode();registering=!registering;status.textContent='';render();};
-  fetch('/api/auth',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(value=>{otpEnabled=!!value?.emailOtpEnabled;if(codeButton)codeButton.hidden=!otpEnabled;});
-  async function sendCode(details){
-    if(Date.now()<resendAt)throw Error('Please wait before requesting another code.');
-    await request({action:'sendEmailCode',role,email:details.email,registering:details.action==='register',setupCode:details.action==='register'?details.setupCode:undefined});
-    resendAt=Date.now()+60000;pendingAccount=details;form.hidden=true;toggle.hidden=true;codeForm.hidden=false;codeButton.hidden=true;
-  }
-  form.onsubmit=async e=>{
-    e.preventDefault();status.textContent='';
-    try{
-      const details=accountDetails();
-      if(registering&&otpEnabled){await sendCode(details);status.textContent='Verification code sent to your email.';return;}
-      await request(details);location.href=returnTo;
-    }catch(err){status.textContent=err.message;}
-  };
-  if(codeForm){
-    codeForm.onsubmit=async e=>{
-      e.preventDefault();status.textContent='';
-      try{
-        const code=codeForm.elements.namedItem('code').value.trim();
-        await request({...pendingAccount,code});location.href=returnTo;
-      }catch(err){status.textContent=err.message;}
-    };
-    document.getElementById('cancelCode').onclick=cancelCode;
-    document.getElementById('resendCode').onclick=async()=>{status.textContent='';try{await sendCode(pendingAccount);status.textContent='New verification code sent.';}catch(err){status.textContent=err.message;}};
-  }
-  if(codeButton){
-    codeButton.onclick=async()=>{
-      status.textContent='';
-      try{
-        const details={action:'login',role,email:elements.namedItem('email').value.trim()};
-        if(!details.email)throw Error('Enter your email address first.');
-        await sendCode(details);status.textContent='Verification code sent to your email.';
-      }catch(err){status.textContent=err.message;}
-    };
-  }
-  const passwordInput=document.getElementById('password'), togglePassword=document.getElementById('togglePassword');
-  if(togglePassword&&passwordInput){
-    togglePassword.onclick=()=>{
-      const show=passwordInput.type==='password';
-      passwordInput.type=show?'text':'password';
-      togglePassword.setAttribute('aria-label',show?'Hide password':'Show password');
-      togglePassword.classList.toggle('showing',show);
-    };
-  }
-})(); registering=false,otpEnabled=false,pendingAccount=null,resendAt=0;
+ const role=document.body.dataset.role,form=document.getElementById("accountForm"),status=document.getElementById("accountStatus");
+ let registering=false,otpEnabled=false,pendingAccount=null,resendAt=0;
  const codeForm=document.getElementById("emailCodeForm"),codeButton=document.getElementById("emailCodeLogin"),toggle=document.getElementById("toggleAccount");
  const query=new URL(location.href).searchParams;
  let returnTo=role==='student'?'/student':'/teacher';
@@ -76,14 +9,14 @@
  const demoLink=document.querySelector('.demo-action');
  if(role==='student'&&returnTo.includes('session=')){
   const target=new URL(returnTo,location.origin);status.textContent='Sign in to continue attendance for the scanned class. The teacher’s selected method determines whether confirmation or approval is required.';
-  if(target.searchParams.get('demo')==='1'){demoLink.href=returnTo;demoLink.textContent='Continue as demo student →';}
-  else{demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use your real student account for this attendance request. Ask the teacher for an activation link if needed.';}
+  if(target.searchParams.get('demo')==='1'){if(demoLink){demoLink.href=returnTo;demoLink.textContent='Continue as demo student →';}}
+  else{if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use your real student account for this attendance request. Ask the teacher for an activation link if needed.';}
  }
 
- if(role==='student'&&returnTo.startsWith('/face-enroll.html?')){status.textContent='Sign in to enroll your own face for teacher approval.';demoLink.hidden=true;document.querySelector('.demo-note').textContent='Use the student account registered by your teacher.';}
+ if(role==='student'&&returnTo.startsWith('/face-enroll.html?')){status.textContent='Sign in to enroll your own face for teacher approval.';if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use the student account registered by your teacher.';}
  if(query.has('invite')){document.getElementById('invite').value=query.get('invite');document.getElementById('email').value=query.get('email')||'';history.replaceState({},'',location.pathname);registering=true;}
- asyncfunction isValidDomain(e){return e.endsWith('@jainuniversity.ac.in')||e.endsWith('@jgi.ac.in');}
- function request(body){
+ function isValidDomain(e){return e.endsWith('@jainuniversity.ac.in')||e.endsWith('@jgi.ac.in');}
+ async function request(body){
   const response=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let value;try{value=await response.json()}catch{throw Error('Account service is unavailable. Please retry.');}
   if(!response.ok)throw Error(value.error||'Unable to complete this request.');return value;
@@ -98,7 +31,7 @@
   await request({action:'sendEmailCode',role,email:details.email,registering:details.action==='register',setupCode:details.setupCode,invite:details.invite});
   resendAt=Date.now()+60000;pendingAccount=details;form.hidden=true;toggle.hidden=true;codeButton.hidden=true;codeForm.hidden=false;document.getElementById('emailCode').focus();status.textContent='Enter the verification code sent to '+details.email+'. Check spam too.';
  }
- codeButton.onclick=async()=>{const email=form.elements.namedItem('email');if(!email.reportValidity())returif(!isValidDomain(email.value.trim())){status.textContent='Please use your official college email address (@jainuniversity.ac.in or @jgi.ac.in).';return;}n;codeButton.disabled=true;try{await sendCode({...accountDetails(),action:'login',password:undefined});}catch(error){status.textContent=error.message;}finally{codeButton.disabled=false;}};
+ codeButton.onclick=async()=>{const email=form.elements.namedItem('email');if(!email.reportValidity())return;if(!isValidDomain(email.value.trim())){status.textContent='Please use your official college email address (@jainuniversity.ac.in or @jgi.ac.in).';return;}codeButton.disabled=true;try{await sendCode({...accountDetails(),action:'login',password:undefined});}catch(error){status.textContent=error.message;}finally{codeButton.disabled=false;}};
  document.getElementById('cancelEmailCode').onclick=()=>{cancelCode();status.textContent='';};
  document.getElementById('resendEmailCode').onclick=async()=>{if(!pendingAccount)return;try{await sendCode(pendingAccount)}catch(error){status.textContent=error.message;}};
  codeForm.onsubmit=async event=>{
