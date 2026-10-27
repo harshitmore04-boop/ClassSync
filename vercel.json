@@ -1,7 +1,7 @@
 {
   "version": 2,
   "framework": null,
-  "buildCommand": "",
+  "buildCommand": "npm ci --prefix server && node server/build.mjs",
   "installCommand": "",
   "outputDirectory": "public",
   "cleanUrls": true,
