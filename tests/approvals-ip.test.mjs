@@ -1,3 +1,4 @@
+import {seedSession} from './account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLocalApplication} from '../serve-local.mjs';
@@ -7,8 +8,8 @@ async function fixture(requireIp=true,auth='approval'){
   const response=await app.dispatch(new Request('https://class.test'+url,{method:body?'POST':'GET',headers:{Origin:'https://class.test','Content-Type':'application/json','cf-connecting-ip':ip,Cookie:cookie},...(body?{body:JSON.stringify(body)}:{})}));
   const result=await response.json();assert.equal(response.status,status,JSON.stringify(result));return {result,cookie:response.headers.get('set-cookie')?.split(';')[0]||''};
  }
- teacher=(await call('/api/auth',{action:'register',role:'teacher',name:'Teacher',email:'teacher@example.com',password:'test-teacher-password',setupCode:'test-only-code'})).cookie;
- async function enroll(name,roll,email){await call('/api/attendance',{action:'student',name,roll,email});const student=app.sql.prepare('SELECT id FROM students WHERE roll=?').get(roll);const invitation=(await call('/api/attendance',{action:'studentInvite',studentId:student.id})).result;return (await call('/api/auth',{action:'register',role:'student',name,email,password:'test-student-password',invite:new URL(invitation.inviteUrl).searchParams.get('invite')})).cookie;}
+ teacher=seedSession(app,{role:'teacher',email:'teacher@example.com',name:'Teacher'});
+ async function enroll(name,roll,email){await call('/api/attendance',{action:'student',name,roll,email});const student=app.sql.prepare('SELECT id FROM students WHERE roll=?').get(roll);const invitation=(await call('/api/attendance',{action:'studentInvite',studentId:student.id})).result;return seedSession(app,{role:'student',name,email});}
  const student=await enroll('Harshit More','R1','harshit@example.com');
  const token=(await call('/api/attendance',{action:'session',subject:'COA',room:'B204',duration:180,mode:'qr',auth,requireIp})).result.token;
  return {...app,call,enroll,token,student};

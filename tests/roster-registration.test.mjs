@@ -1,3 +1,4 @@
+import {seedSession} from './account-fixture.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {createLocalApplication} from '../serve-local.mjs';import {parseRoster,parsePdfRosterLines} from '../public/roster-core.js';
 test('CSV, TSV, roll-only lists and PDF rows preserve student names and reject duplicates',()=>{
  assert.deepEqual(parseRoster('\uFEFFUSN,Student Name,Email\r\n25btrpw046,"More, Harshit",\r\n')[0],{roll:'25BTRPW046',name:'More, Harshit',email:''});
@@ -11,7 +12,7 @@ test('teacher imports class list atomically; unlisted rolls and wrong names cann
  async function call(path,body,{cookie=teacher,status=200}={}){const r=await h.dispatch(new Request('https://class.test'+path,{method:body?'POST':'GET',headers:{Origin:'https://class.test','Content-Type':'application/json',Cookie:cookie,'cf-connecting-ip':'1.2.3.4'},...(body?{body:JSON.stringify(body)}:{})}));const v=await r.json();assert.equal(r.status,status,JSON.stringify(v));return {v,cookie:r.headers.get('set-cookie')?.split(';')[0]||''};}
  const api=(body,opts)=>call('/api/face-enrollment',body,opts).then(r=>r.v);
  try{
- teacher=(await call('/api/auth',{action:'register',role:'teacher',name:'Teacher',email:'teacher@example.com',password:'test-password-very-long',setupCode:'code'})).cookie;
+ teacher=seedSession(h,{role:'teacher',email:'teacher@example.com',name:'Teacher'});
  await call('/api/attendance',{action:'rosterImport',rows:[{roll:'R1',name:'Harshit More'},{roll:'R2'}]},{cookie:'',status:401});
  const first=(await call('/api/attendance',{action:'rosterImport',rows:[{roll:'r1',name:'Harshit More'},{roll:'R2'}]})).v;assert.equal(first.added,2);
  await call('/api/attendance',{action:'rosterImport',rows:[{roll:'R3',name:'Garv'},{roll:'r3',name:'Other'}]},{status:400});assert.equal(h.sql.prepare('SELECT COUNT(*) n FROM students').get().n,2);
