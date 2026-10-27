@@ -15,7 +15,8 @@
 
  if(role==='student'&&returnTo.startsWith('/face-enroll.html?')){status.textContent='Sign in to enroll your own face for teacher approval.';demoLink.hidden=true;document.querySelector('.demo-note').textContent='Use the student account registered by your teacher.';}
  if(query.has('invite')){document.getElementById('invite').value=query.get('invite');document.getElementById('email').value=query.get('email')||'';history.replaceState({},'',location.pathname);registering=true;}
- async function request(body){
+ asyncfunction isValidDomain(e){return e.endsWith('@jainuniversity.ac.in')||e.endsWith('@jgi.ac.in');}
+ function request(body){
   const response=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let value;try{value=await response.json()}catch{throw Error('Account service is unavailable. Please retry.');}
   if(!response.ok)throw Error(value.error||'Unable to complete this request.');return value;
@@ -30,7 +31,7 @@
   await request({action:'sendEmailCode',role,email:details.email,registering:details.action==='register',setupCode:details.setupCode,invite:details.invite});
   resendAt=Date.now()+60000;pendingAccount=details;form.hidden=true;toggle.hidden=true;codeButton.hidden=true;codeForm.hidden=false;document.getElementById('emailCode').focus();status.textContent='Enter the verification code sent to '+details.email+'. Check spam too.';
  }
- codeButton.onclick=async()=>{const email=form.elements.namedItem('email');if(!email.reportValidity())return;codeButton.disabled=true;try{await sendCode({...accountDetails(),action:'login',password:undefined});}catch(error){status.textContent=error.message;}finally{codeButton.disabled=false;}};
+ codeButton.onclick=async()=>{const email=form.elements.namedItem('email');if(!email.reportValidity())returif(!isValidDomain(email.value.trim())){status.textContent='Please use your official college email address (@jainuniversity.ac.in or @jgi.ac.in).';return;}n;codeButton.disabled=true;try{await sendCode({...accountDetails(),action:'login',password:undefined});}catch(error){status.textContent=error.message;}finally{codeButton.disabled=false;}};
  document.getElementById('cancelEmailCode').onclick=()=>{cancelCode();status.textContent='';};
  document.getElementById('resendEmailCode').onclick=async()=>{if(!pendingAccount)return;try{await sendCode(pendingAccount)}catch(error){status.textContent=error.message;}};
  codeForm.onsubmit=async event=>{
