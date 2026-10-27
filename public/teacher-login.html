@@ -92,6 +92,7 @@
 <form id="accountForm">
 <label for="email">Email address</label>
 <input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="you@example.com" required>
+<div id="teacherRegistration" hidden><label for="teacherCode">Teacher registration code</label><input id="teacherCode" name="teacherCode" type="password" autocomplete="off" maxlength="128"><p class="auth-note">Required only when registering the first teacher account.</p></div>
 <button class="primary" id="sendEmailCode" type="submit" disabled>Send verification code</button>
 </form>
 <form id="emailCodeForm" hidden>
@@ -103,7 +104,7 @@
 <button class="continue account-toggle" id="changeEmail" type="button">Use a different email</button>
 </form>
 <p id="accountStatus" role="status" aria-live="polite"></p>
-<p class="auth-note">We'll send a one-time verification code to your email. No password needed.</p>
+<p class="auth-note">We'll send a one-time verification code to your email. No account password needed.</p>
 <div class="info">Use the email linked to your authorized teacher account. Check your inbox and spam folder for the code.</div>
 <footer class="entry-footer">
 <span>ClassSync · Attendance &amp; academic recovery</span>

@@ -4,7 +4,7 @@
  const status=document.getElementById('accountStatus'),emailInput=document.getElementById('email'),codeInput=document.getElementById('emailCode');
  const sendButton=document.getElementById('sendEmailCode'),verifyButton=document.getElementById('verifyEmailCode');
  const resendButton=document.getElementById('resendEmailCode'),changeButton=document.getElementById('changeEmail');
- let pendingEmail='',resendAt=0,timer=null,busy=false;
+ let pendingEmail='',pendingTeacherCode='',resendAt=0,timer=null,busy=false;
  let returnTo=role==='student'?'/student':'/teacher';
  const query=new URL(location.href).searchParams;
  if(role==='student'&&query.has('returnTo')){
@@ -29,7 +29,8 @@
  async function sendCode(email){
   setBusy(true);sendButton.textContent='Sending code…';status.textContent='';
   try{
-   const result=await request({action:'sendEmailCode',email,role});
+   const setupCode=role==='teacher'?(pendingEmail?pendingTeacherCode:document.getElementById('teacherCode')?.value||''):undefined;
+   const result=await request({action:'sendEmailCode',email,role,setupCode});pendingTeacherCode=setupCode||'';
    pendingEmail=email;resendAt=Date.now()+Math.max(60,Number(result.resendAfter)||60)*1000;
    document.getElementById('codeDestination').textContent=email;
    form.hidden=true;codeForm.hidden=false;codeForm.reset();
@@ -39,17 +40,18 @@
  }
  form.onsubmit=event=>{event.preventDefault();if(!busy&&form.reportValidity())sendCode(emailInput.value.trim().toLowerCase());};
  resendButton.onclick=()=>{if(!busy&&pendingEmail&&Date.now()>=resendAt)sendCode(pendingEmail);};
- changeButton.onclick=()=>{if(busy)return;pendingEmail='';if(timer)clearInterval(timer);timer=null;codeForm.reset();codeForm.hidden=true;form.hidden=false;status.textContent='';emailInput.focus();};
+ changeButton.onclick=()=>{if(busy)return;pendingEmail='';pendingTeacherCode='';if(timer)clearInterval(timer);timer=null;codeForm.reset();codeForm.hidden=true;form.hidden=false;status.textContent='';emailInput.focus();};
  codeForm.onsubmit=async event=>{
   event.preventDefault();if(busy||!pendingEmail||!codeForm.reportValidity())return;
   setBusy(true);verifyButton.textContent='Verifying…';status.textContent='';
-  try{await request({action:'verifyEmailCode',email:pendingEmail,role,code:codeInput.value.trim()});location.assign(returnTo);}
+  try{await request({action:'verifyEmailCode',email:pendingEmail,role,code:codeInput.value.trim(),...(role==='teacher'?{setupCode:pendingTeacherCode}:{})});location.assign(returnTo);}
   catch(error){showError(error);codeInput.focus();}
   finally{verifyButton.textContent='Verify & sign in';setBusy(false);}
  };
  fetch('/api/auth',{cache:'no-store'}).then(async response=>{
   if(!response.ok)throw Error('Email sign-in is temporarily unavailable. Please refresh and try again.');
   const config=await response.json();if(!config.emailOtpEnabled)throw Error('Email sign-in is temporarily unavailable. Please try again shortly.');
+  if(role==='teacher'){const group=document.getElementById('teacherRegistration'),field=document.getElementById('teacherCode');group.hidden=!config.teacherSetupAvailable;field.required=!!config.teacherSetupAvailable;}
   sendButton.disabled=false;
  }).catch(showError);
  window.addEventListener('pagehide',()=>{if(timer)clearInterval(timer);});
