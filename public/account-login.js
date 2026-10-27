@@ -1,49 +1,56 @@
 (() => {
- const role=document.body.dataset.role,form=document.getElementById("accountForm"),status=document.getElementById("accountStatus");
- let registering=false,otpEnabled=false,pendingAccount=null,resendAt=0;
- const codeForm=document.getElementById("emailCodeForm"),codeButton=document.getElementById("emailCodeLogin"),toggle=document.getElementById("toggleAccount");
- const query=new URL(location.href).searchParams;
+ const role=document.body.dataset.role;
+ const form=document.getElementById('accountForm'),codeForm=document.getElementById('emailCodeForm');
+ const status=document.getElementById('accountStatus'),emailInput=document.getElementById('email'),codeInput=document.getElementById('emailCode');
+ const sendButton=document.getElementById('sendEmailCode'),verifyButton=document.getElementById('verifyEmailCode');
+ const resendButton=document.getElementById('resendEmailCode'),changeButton=document.getElementById('changeEmail');
+ let pendingEmail='',resendAt=0,timer=null,busy=false;
  let returnTo=role==='student'?'/student':'/teacher';
- if(role==='student'&&query.has('returnTo')){try{const target=new URL(query.get('returnTo'),location.origin);if(target.origin===location.origin&&['/student','/student.html','/face-enroll.html'].includes(target.pathname))returnTo=target.pathname+target.search;}catch{}}
- const continueLink=document.querySelector('.continue[href]');if(continueLink)continueLink.href=returnTo;
- const demoLink=document.querySelector('.demo-action');
- if(role==='student'&&returnTo.includes('session=')){
-  const target=new URL(returnTo,location.origin);status.textContent='Sign in to continue attendance for the scanned class. The teacher’s selected method determines whether confirmation or approval is required.';
-  if(target.searchParams.get('demo')==='1'){if(demoLink){demoLink.href=returnTo;demoLink.textContent='Continue as demo student →';}}
-  else{if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use your real student account for this attendance request. Ask the teacher for an activation link if needed.';}
+ const query=new URL(location.href).searchParams;
+ if(role==='student'&&query.has('returnTo')){
+  try{const target=new URL(query.get('returnTo'),location.origin);if(target.origin===location.origin&&['/student','/student.html','/face-enroll.html','/attendance.html'].includes(target.pathname))returnTo=target.pathname+target.search;}catch{}
  }
-
- if(role==='student'&&returnTo.startsWith('/face-enroll.html?')){status.textContent='Sign in to enroll your own face for teacher approval.';if(demoLink)demoLink.hidden=true;const note=document.querySelector('.demo-note');if(note)note.textContent='Use the student account registered by your teacher.';}
- if(query.has('invite')){document.getElementById('invite').value=query.get('invite');document.getElementById('email').value=query.get('email')||'';history.replaceState({},'',location.pathname);registering=true;}
- function isValidDomain(e){return e.endsWith('@jainuniversity.ac.in')||e.endsWith('@jgi.ac.in');}
+ // Old invitation links may prefill an email, but invitations are no longer credentials.
+ if(query.has('email'))emailInput.value=query.get('email');
+ if(query.has('invite'))history.replaceState({},'',location.pathname+(query.has('returnTo')?'?returnTo='+encodeURIComponent(query.get('returnTo')):''));
  async function request(body){
-  const response=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  let value;try{value=await response.json()}catch{throw Error('Account service is unavailable. Please retry.');}
-  if(!response.ok)throw Error(value.error||'Unable to complete this request.');return value;
+  const response=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
+  let value;try{value=await response.json();}catch{throw Error('Sign-in is temporarily unavailable. Please try again.');}
+  if(!response.ok)throw Error(value.error||'Unable to complete sign-in. Please try again.');
+  return value;
  }
- function accountDetails(){return {action:registering?'register':'login',role,email:form.elements.namedItem('email').value.trim().toLowerCase(),password:form.elements.namedItem('password').value,name:form.elements.namedItem('accountName').value,setupCode:form.elements.namedItem('setupCode')?.value,invite:form.elements.namedItem('invite')?.value};}
- function render(){document.getElementById('registrationFields').hidden=!registering;document.getElementById('submitAccount').textContent=registering?(otpEnabled?'Verify email & continue':role==='teacher'?'Create teacher account':'Activate student account'):'Sign in';toggle.textContent=registering?'Already have an account? Sign in':role==='teacher'?'First-time teacher setup':'Have a teacher invitation? Activate account';document.getElementById('password').autocomplete=registering?'new-password':'current-password';codeButton.hidden=!otpEnabled||registering||!!pendingAccount;}
- function cancelCode(){pendingAccount=null;codeForm.hidden=true;codeForm.reset();form.hidden=false;toggle.hidden=false;render();}
- toggle.onclick=()=>{cancelCode();registering=!registering;status.textContent='';render()};render();
- fetch('/api/auth',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(value=>{otpEnabled=!!value?.emailOtpEnabled;render();}).catch(()=>{});
- async function sendCode(details){
-  if(Date.now()<resendAt)throw Error('Please wait before requesting another code.');
-  await request({action:'sendEmailCode',role,email:details.email,registering:details.action==='register',setupCode:details.setupCode,invite:details.invite});
-  resendAt=Date.now()+60000;pendingAccount=details;form.hidden=true;toggle.hidden=true;codeButton.hidden=true;codeForm.hidden=false;document.getElementById('emailCode').focus();status.textContent='Enter the verification code sent to '+details.email+'. Check spam too.';
+ function cooldown(){
+  const remaining=Math.max(0,Math.ceil((resendAt-Date.now())/1000));
+  resendButton.textContent=remaining?'Resend code in '+remaining+'s':'Resend code';
+  resendButton.disabled=busy||remaining>0;
  }
- codeButton.onclick=async()=>{const email=form.elements.namedItem('email');if(!email.reportValidity())return;if(!isValidDomain(email.value.trim())){status.textContent='Please use your official college email address (@jainuniversity.ac.in or @jgi.ac.in).';return;}codeButton.disabled=true;try{await sendCode({...accountDetails(),action:'login',password:undefined});}catch(error){status.textContent=error.message;}finally{codeButton.disabled=false;}};
- document.getElementById('cancelEmailCode').onclick=()=>{cancelCode();status.textContent='';};
- document.getElementById('resendEmailCode').onclick=async()=>{if(!pendingAccount)return;try{await sendCode(pendingAccount)}catch(error){status.textContent=error.message;}};
+ function setBusy(value){busy=value;sendButton.disabled=value;verifyButton.disabled=value;changeButton.disabled=value;cooldown();}
+ function showError(error){status.textContent=error.name==='TimeoutError'?'The request timed out. Please try again.':error.message;}
+ async function sendCode(email){
+  setBusy(true);sendButton.textContent='Sending code…';status.textContent='';
+  try{
+   const result=await request({action:'sendEmailCode',email,role});
+   pendingEmail=email;resendAt=Date.now()+Math.max(60,Number(result.resendAfter)||60)*1000;
+   document.getElementById('codeDestination').textContent=email;
+   form.hidden=true;codeForm.hidden=false;codeForm.reset();
+   status.textContent='Code sent. Check your inbox and spam folder.';
+   if(timer)clearInterval(timer);timer=setInterval(cooldown,1000);codeInput.focus();
+  }catch(error){showError(error);}finally{sendButton.textContent='Send verification code';setBusy(false);}
+ }
+ form.onsubmit=event=>{event.preventDefault();if(!busy&&form.reportValidity())sendCode(emailInput.value.trim().toLowerCase());};
+ resendButton.onclick=()=>{if(!busy&&pendingEmail&&Date.now()>=resendAt)sendCode(pendingEmail);};
+ changeButton.onclick=()=>{if(busy)return;pendingEmail='';if(timer)clearInterval(timer);timer=null;codeForm.reset();codeForm.hidden=true;form.hidden=false;status.textContent='';emailInput.focus();};
  codeForm.onsubmit=async event=>{
-  event.preventDefault();if(!pendingAccount)return;const button=document.getElementById('verifyEmailCode');button.disabled=true;
-  try{const details=pendingAccount,value=await request({action:'verifyEmailCode',email:details.email,role,registering:details.action==='register',code:document.getElementById('emailCode').value.trim()});
-   const result=details.action==='register'?await request({...details,emailProof:value.emailProof}):value;
-   pendingAccount=null;location.assign(role==='student'?returnTo:result.redirect);
-  }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
+  event.preventDefault();if(busy||!pendingEmail||!codeForm.reportValidity())return;
+  setBusy(true);verifyButton.textContent='Verifying…';status.textContent='';
+  try{await request({action:'verifyEmailCode',email:pendingEmail,role,code:codeInput.value.trim()});location.assign(returnTo);}
+  catch(error){showError(error);codeInput.focus();}
+  finally{verifyButton.textContent='Verify & sign in';setBusy(false);}
  };
- form.onsubmit=async event=>{
-  event.preventDefault();const button=document.getElementById('submitAccount');button.disabled=true;status.textContent=registering?'Preparing your account…':'Signing in…';
-  try{const details=accountDetails();if(registering&&otpEnabled){await sendCode(details);return;}const value=await request(details);location.assign(role==='student'?returnTo:value.redirect);}
-  catch(error){status.textContent=error.message;}finally{button.disabled=false;}
- };
+ fetch('/api/auth',{cache:'no-store'}).then(async response=>{
+  if(!response.ok)throw Error('Email sign-in is temporarily unavailable. Please refresh and try again.');
+  const config=await response.json();if(!config.emailOtpEnabled)throw Error('Email sign-in is temporarily unavailable. Please try again shortly.');
+  sendButton.disabled=false;
+ }).catch(showError);
+ window.addEventListener('pagehide',()=>{if(timer)clearInterval(timer);});
 })();
