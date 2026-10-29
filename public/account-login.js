@@ -53,6 +53,7 @@ function chooseMode(next){
   if(busy)return;if(timer)clearInterval(timer);timer=null;codeForm.reset();mode=next;pendingEmail='';pendingTeacherCode='';pendingDetails={};form.hidden=false;codeForm.hidden=true;status.textContent='';
   document.getElementById('chooseSignIn')?.setAttribute('aria-pressed',String(mode==='signin'));
   document.getElementById('chooseCreate')?.setAttribute('aria-pressed',String(mode==='create'));
+  const title=document.getElementById('loginTitle');if(title)title.textContent=mode==='create'?'Create your '+role+' account.':'Welcome back, '+role+'.';
   const label=document.getElementById('accessMode');if(label)label.textContent=mode==='create'?'Create your account by verifying your email.':'Sign in with your email and a one-time code.';
   if(role==='teacher'){document.getElementById('teacherRegistration').hidden=mode!=='create';document.getElementById('teacherCode').required=mode==='create';}
   else {const group=document.getElementById('studentRegistration');if(group)group.hidden=mode!=='create';for(const id of ['studentName','studentRoll']){const field=document.getElementById(id);if(field)field.required=mode==='create';}}
