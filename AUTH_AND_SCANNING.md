@@ -2,9 +2,9 @@
 
 ## Real accounts
 
-Teacher and student pages use email verification codes only. Supabase Auth verifies mailbox ownership using the configured custom SMTP service (Brevo). The email template must contain `{{ .Token }}`. No password, teacher setup code, or student invitation code is entered on either page. Legacy password login and registration API actions are rejected.
+Teacher and student pages use email verification codes only. Supabase Auth verifies mailbox ownership using the configured custom SMTP service (Brevo). The email template must contain `{{ .Token }}`. Passwords and student invitation codes are not used. Any email can register after OTP verification. New teacher accounts additionally require the server-verified registration code; returning teachers use only email and OTP. Legacy password login and registration API actions are rejected.
 
-An existing account keeps its stored role. A new student account is created only after successful OTP verification for an email already on the class list. First-teacher initialization requires that email to be present in the server's `CLASS_SYNC_TEACHER_EMAILS` setting; it cannot replace an existing classroom teacher. Selecting a portal or supplying provider user metadata cannot elevate privileges.
+An existing account keeps its stored role. Any email can create a student account after OTP verification; registration alone does not enroll the student for attendance. Any email can create a teacher account after both OTP and the server-configured registration code are verified. Authorized teachers share the existing classroom; registration preserves its owner and data. Email allowlists are not used. Selecting a portal or supplying provider user metadata cannot elevate privileges.
 
 Session cookies remain HttpOnly, SameSite=Lax and Secure on HTTPS, with hashed server-side session tokens and a seven-day expiry. Same-origin requests, field limits, per-email/IP attempt limits and provider OTP expiry/replay protection remain in place. Changing email requests a new code, and the client enforces a 60-second resend cooldown. Backend authorization is checked again after email verification.
 
