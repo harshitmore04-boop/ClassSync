@@ -31,10 +31,12 @@ test('invalid and expired session cookies cannot access classroom data',async()=
   h.sql.prepare('UPDATE account_sessions SET expires=0').run();await h.request('/api/attendance',null,{cookie,status:401});
  }finally{h.close();}
 });
-test('both public sign-in pages offer only email and OTP, without setup or invitation fields',()=>{
+test('sign-in pages use email and OTP, with a separate first-teacher registration code',()=>{
  for(const role of ['student','teacher']){
   const login=fs.readFileSync(new URL('../public/'+role+'-login.html',import.meta.url),'utf8');
-  assert.match(login,/id="accountForm"/);assert.match(login,/type="email"/);assert.match(login,/autocomplete="one-time-code"/);assert.doesNotMatch(login,/type="password"|id="setupCode"|id="invite"|id="toggleAccount"|signin-with-chatgpt/);
+  assert.match(login,/id="accountForm"/);assert.match(login,/type="email"/);assert.match(login,/autocomplete="one-time-code"/);assert.doesNotMatch(login,/id="password"|name="password"|id="setupCode"|id="invite"|id="toggleAccount"|signin-with-chatgpt/);
+  if(role==='student')assert.doesNotMatch(login,/type="password"|id="teacherCode"/);
+  else assert.match(login,/id="teacherRegistration" hidden/);
   const portal=fs.readFileSync(new URL('../public/'+role+'.html',import.meta.url),'utf8');assert.match(portal,/data-signout/);assert.match(portal,/data-switch-portal/);
  }
 });
