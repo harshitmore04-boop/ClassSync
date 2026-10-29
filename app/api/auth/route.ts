@@ -1,7 +1,7 @@
 import {emailVerificationEnabled,sendEmailCode,verifyEmailCode} from '../../lib/email-verification';
 import {proxyRequest} from '../../lib/trusted-proxy';
 import {env} from 'cloudflare:workers';
-import {getAccountUser,cookieToken,sessionCookie,createSession,digest,randomToken,reserveAuthAttempt} from '../../lib/accounts';
+import {getAccountUser,cookieToken,sessionCookie,createSession,digest,equal,randomToken,reserveAuthAttempt} from '../../lib/accounts';
 export const dynamic='force-dynamic';
 const reply=(body:any,status=200,cookie?:string)=>Response.json(body,{status,headers:{'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})}});
 const denied='Use your authorized teacher email or the student email registered on the class list, in the matching portal.';
@@ -17,6 +17,11 @@ async function eligibleAccount(email:string,role:string){
  const authorized=String((env as any).CLASS_SYNC_TEACHER_EMAILS||'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean);
  if(!authorized.includes(email)||await env.DB!.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first())return null;
  return {existing:null,name:email.split('@')[0]};
+}
+async function registrationAllowed(eligible:{existing:any},role:string,code:unknown){
+ if(role!=='teacher'||eligible.existing)return true;
+ const hash=String((env as any).CLASS_SYNC_TEACHER_SETUP_HASH||'');
+ return typeof code==='string'&&code.length>0&&code.length<=128&&!!hash&&equal(await digest(code),hash);
 }
 async function activateAccount(email:string,role:string,eligible:{existing:any,name:string}){
  if(eligible.existing)return eligible.existing;
@@ -36,7 +41,7 @@ async function activateAccount(email:string,role:string,eligible:{existing:any,n
  return account;
 }
 export async function GET(request:Request){
- try{request=await proxyRequest(request);const user=await getAccountUser(request);return reply({user:user?{email:user.email,name:user.displayName,role:user.role}:null,authMethod:'email_otp',emailOtpEnabled:emailVerificationEnabled()});}
+ try{request=await proxyRequest(request);const user=await getAccountUser(request);return reply({user:user?{email:user.email,name:user.displayName,role:user.role}:null,authMethod:'email_otp',emailOtpEnabled:emailVerificationEnabled(),teacherSetupAvailable:!await env.DB!.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()});}
  catch{return reply({error:'Account service unavailable.'},503);}
 }
 export async function POST(request:Request){
@@ -56,6 +61,7 @@ export async function POST(request:Request){
   if(!/^\S+@\S+\.\S+$/.test(email)||email.length>150||!['student','teacher'].includes(role))return reply({error:'Enter your registered email and choose the correct portal.'},400);
   if(!await reserveAuthAttempt(request,email))return reply({error:'Too many attempts. Please wait 15 minutes and try again.'},429);
   const eligible=await eligibleAccount(email,role);if(!eligible)return reply({error:denied},403);
+  if(!await registrationAllowed(eligible,role,body.setupCode))return reply({error:'Enter the teacher registration code for your first sign-in.'},403);
   if(body.action==='sendEmailCode'){
    try{await sendEmailCode(email);return reply({ok:true,message:'Check your email for the verification code.',resendAfter:60});}
    catch(error){return reply({error:error instanceof Error?error.message:'Email delivery failed.'},502);}
@@ -64,6 +70,7 @@ export async function POST(request:Request){
   catch(error){return reply({error:error instanceof Error?error.message:'Unable to verify email.'},400);}
   // Authorization is checked again after provider verification, before issuing a session.
   const current=await eligibleAccount(email,role);if(!current)return reply({error:denied},403);
+  if(!await registrationAllowed(current,role,body.setupCode))return reply({error:'Enter the teacher registration code for your first sign-in.'},403);
   const account=await activateAccount(email,role,current);
   return reply({ok:true,role:account.role,redirect:account.role==='teacher'?'/teacher':'/student'},200,await createSession(request,account.id));
  }catch(error){console.error('ClassSync email sign-in failed:',error instanceof Error?error.name:'Error');return reply({error:'Unable to complete sign-in. Please retry.'},503);}
