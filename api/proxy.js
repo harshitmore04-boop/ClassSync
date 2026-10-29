@@ -2230,6 +2230,11 @@ var encoder = new TextEncoder();
 var hex = (bytes) => Array.from(new Uint8Array(bytes)).map((b2) => b2.toString(16).padStart(2, "0")).join("");
 var digest = async (value) => hex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 var randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
+function equal(a, b2) {
+  let difference = a.length ^ b2.length;
+  for (let i = 0; i < Math.max(a.length, b2.length); i++) difference |= (a.charCodeAt(i) || 0) ^ (b2.charCodeAt(i) || 0);
+  return difference === 0;
+}
 function cookieToken(request) {
   return request.headers.get("cookie")?.split(";").map((s) => s.trim()).find((s) => s.startsWith(COOKIE + "="))?.slice(COOKIE.length + 1) || "";
 }
@@ -2252,7 +2257,7 @@ async function reserveAuthAttempt(request, email) {
   const keys = [{ key: await digest("email:" + email + ":" + bucket), limit: 12 }, { key: await digest("ip:" + ip + ":" + bucket), limit: 100 }];
   await db.prepare("DELETE FROM auth_attempts WHERE expires<?").bind(now).run();
   for (const entry of keys) {
-    await db.prepare("INSERT INTO auth_attempts (id,hits,expires) VALUES (?,1,?) ON CONFLICT(id) DO UPDATE SET hits=hits+1").bind(entry.key, (bucket + 1) * 9e5).run();
+    await db.prepare("INSERT INTO auth_attempts (id,hits,expires) VALUES (?,1,?) ON CONFLICT(id) DO UPDATE SET hits=auth_attempts.hits+1").bind(entry.key, (bucket + 1) * 9e5).run();
     const row = await db.prepare("SELECT hits FROM auth_attempts WHERE id=?").bind(entry.key).first();
     if (row.hits > entry.limit) return null;
   }
@@ -2267,30 +2272,27 @@ async function issueStudentInvite(studentId) {
 // app/api/auth/route.ts
 var dynamic = "force-dynamic";
 var reply = (body, status = 200, cookie) => Response.json(body, { status, headers: { "Cache-Control": "no-store", ...cookie ? { "Set-Cookie": cookie } : {} } });
-var denied = "Use your authorized teacher email or the student email registered on the class list, in the matching portal.";
+var denied = "This email already belongs to a different portal. Use the matching student or teacher portal.";
 async function eligibleAccount(email, role) {
   const existing = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
   if (existing) return existing.role === role ? { existing, name: existing.name } : null;
-  if (role === "student") {
-    const student = await env.DB.prepare("SELECT name FROM students WHERE email=?").bind(email).first();
-    return student ? { existing: null, name: student.name } : null;
-  }
-  const authorized = String(env.CLASS_SYNC_TEACHER_EMAILS || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
-  if (!authorized.includes(email) || await env.DB.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()) return null;
-  return { existing: null, name: email.split("@")[0] };
+  const student = role === "student" ? await env.DB.prepare("SELECT name FROM students WHERE email=?").bind(email).first() : null;
+  return { existing: null, name: student?.name || email.split("@")[0] };
 }
-async function activateAccount(email, role, eligible) {
+async function registrationAllowed(eligible, role, code) {
+  if (role !== "teacher" || eligible.existing) return true;
+  const hash = String(env.CLASS_SYNC_TEACHER_SETUP_HASH || "");
+  return typeof code === "string" && code.length > 0 && code.length <= 128 && !!hash && equal(await digest(code), hash);
+}
+async function activateAccount(email, role, eligible, profile) {
   if (eligible.existing) return eligible.existing;
   const id = crypto.randomUUID();
   const values2 = [id, email, eligible.name, role, randomToken(), randomToken(), 1e5, Date.now()];
-  if (role === "teacher") {
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created,teacher_slot) SELECT ?,?,?,?,?,?,?,?,'classroom' WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE teacher_slot='classroom') ON CONFLICT(email) DO NOTHING").bind(...values2),
-      env.DB.prepare("INSERT INTO workspace (id,owner) SELECT 'classroom',id FROM accounts WHERE email=? AND role='teacher' AND teacher_slot='classroom' ON CONFLICT(id) DO UPDATE SET owner=excluded.owner").bind(email)
-    ]);
-  } else {
-    await env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM students WHERE email=?) ON CONFLICT(email) DO NOTHING").bind(...values2, email).run();
-  }
+  const statements = [];
+  if (role === "student" && profile) statements.push(env.DB.prepare("INSERT INTO students (id,name,roll,email,created_at,parent_email) VALUES (?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING").bind(crypto.randomUUID(), profile.name, profile.roll, email, Date.now(), ""));
+  statements.push(env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING").bind(...values2));
+  await env.DB.batch(statements);
+  if (role === "teacher") await env.DB.prepare("INSERT INTO workspace (id,owner) SELECT 'classroom',id FROM accounts WHERE email=? AND role='teacher' ON CONFLICT(id) DO NOTHING").bind(email).run();
   const account = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
   if (!account || account.role !== role) throw Error("Your classroom access changed. Please contact your teacher.");
   return account;
@@ -2299,7 +2301,7 @@ async function GET(request) {
   try {
     request = await proxyRequest(request);
     const user = await getAccountUser(request);
-    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, authMethod: "email_otp", emailOtpEnabled: emailVerificationEnabled() });
+    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, authMethod: "email_otp", emailOtpEnabled: emailVerificationEnabled(), teacherSetupAvailable: false });
   } catch {
     return reply({ error: "Account service unavailable." }, 503);
   }
@@ -2325,10 +2327,22 @@ async function POST(request) {
     if (!["sendEmailCode", "verifyEmailCode"].includes(body.action)) return reply({ error: "Use an email verification code to sign in." }, 400);
     if (!emailVerificationEnabled()) return reply({ error: "Email sign-in is temporarily unavailable. Please try again shortly." }, 503);
     const email = String(body.email || "").trim().toLowerCase(), role = body.role;
-    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || !["student", "teacher"].includes(role)) return reply({ error: "Enter your registered email and choose the correct portal." }, 400);
+    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || !["student", "teacher"].includes(role)) return reply({ error: "Enter a valid email address and choose a portal." }, 400);
     if (!await reserveAuthAttempt(request, email)) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
     const eligible = await eligibleAccount(email, role);
     if (!eligible) return reply({ error: denied }, 403);
+    if (body.mode === "signin" && !eligible.existing) return reply({ error: "No account found. Choose Create account first." }, 404);
+    if (body.mode === "create" && eligible.existing) return reply({ error: "This account already exists. Choose Sign in." }, 409);
+    let profile;
+    if (body.mode === "create" && role === "student") {
+      const name = String(body.name || "").trim(), roll = String(body.roll || "").trim().toUpperCase();
+      if (!name || name.length > 60 || !/^[A-Z0-9][A-Z0-9._/-]{0,29}$/.test(roll)) return reply({ error: "Enter your full name and valid USN / roll number." }, 400);
+      const registered = await env.DB.prepare("SELECT email FROM students WHERE roll=?").bind(roll).first();
+      if (registered && registered.email !== email) return reply({ error: "This USN is already registered with another email. Ask your teacher to link your verified email; existing attendance is preserved." }, 409);
+      profile = { name, roll };
+      eligible.name = name;
+    }
+    if (!await registrationAllowed(eligible, role, body.setupCode)) return reply({ error: "Enter the teacher registration code for your first sign-in.", needsTeacherCode: true }, 403);
     if (body.action === "sendEmailCode") {
       try {
         await sendEmailCode(email);
@@ -2344,7 +2358,8 @@ async function POST(request) {
     }
     const current2 = await eligibleAccount(email, role);
     if (!current2) return reply({ error: denied }, 403);
-    const account = await activateAccount(email, role, current2);
+    if (!await registrationAllowed(current2, role, body.setupCode)) return reply({ error: "Enter the teacher registration code for your first sign-in.", needsTeacherCode: true }, 403);
+    const account = await activateAccount(email, role, { ...current2, name: profile?.name || current2.name }, profile);
     return reply({ ok: true, role: account.role, redirect: account.role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, account.id));
   } catch (error) {
     console.error("ClassSync email sign-in failed:", error instanceof Error ? error.name : "Error");
@@ -2532,7 +2547,7 @@ async function auth(request) {
   const db = env.DB;
   if (!db) throw Error("Database binding missing");
   const w = await db.prepare("SELECT owner,target,critical FROM workspace WHERE id=?").bind("classroom").first();
-  return { user, db, teacher: user.role === "teacher" && w?.owner === user.userId, policy: { target: w?.target ?? 75, critical: w?.critical ?? 65 } };
+  return { user, db, teacher: user.role === "teacher" && !!w, policy: { target: w?.target ?? 75, critical: w?.critical ?? 65 } };
 }
 async function publishWarnings(db, policy, token) {
   const session = await db.prepare("SELECT * FROM sessions WHERE token=?").bind(token).first();
@@ -3181,8 +3196,8 @@ async function teacher(request, b2) {
   if (!u) fail3("Sign in as the teacher.", 401);
   if (u.role !== "teacher") fail3("Teacher permission required.", 403);
   const w = await env.DB.prepare("SELECT owner FROM workspace WHERE id=?").bind("classroom").first();
-  if (w?.owner !== u.userId) fail3("Teacher permission required.", 403);
-  return { scope: "live", owner: u.userId };
+  if (!w) fail3("Classroom is not initialized.", 403);
+  return { scope: "live", owner: w.owner };
 }
 async function identity(request, link, b2) {
   if (link.scope === "live") {
