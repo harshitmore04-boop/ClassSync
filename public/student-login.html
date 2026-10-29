@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#122c3c">
 <meta name="description" content="Sign in to ClassSync for attendance tracking, teacher updates and personalized learning recovery.">
 <title>Student sign in | ClassSync</title>
-<link rel="stylesheet" href="/signin.css?v=accounts-1">
+<link rel="stylesheet" href="/signin.css?v=otp-only-1">
 </head>
 <body data-role="student">
 <main class="page">
@@ -91,33 +91,20 @@
 </div>
 <form id="accountForm">
 <label for="email">Email address</label>
-<input id="email" name="email" type="email" autocomplete="username" maxlength="150" required>
-<label for="password">Password</label>
-<input id="password" name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required>
-<div id="registrationFields" hidden>
-<label for="accountName">Your name</label>
-<input id="accountName" name="accountName" maxlength="60" autocomplete="name">
-<label for="invite">Student invitation code</label>
-<input id="invite" name="invite" type="password" autocomplete="off" placeholder="Use your teacher’s invitation link">
-</div>
-<button class="primary" id="submitAccount" type="submit">Sign in</button>
-<p id="accountStatus" role="status" aria-live="polite">
-</p>
+<input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="you@example.com" required>
+<button class="primary" id="sendEmailCode" type="submit" disabled>Send verification code</button>
 </form>
-<button class="continue account-toggle" id="emailCodeLogin" type="button" hidden>Sign in with an email code</button>
 <form id="emailCodeForm" hidden>
+<p class="entry-copy">Enter the code sent to <strong id="codeDestination"></strong>.</p>
 <label for="emailCode">Email verification code</label>
-<input id="emailCode" name="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" minlength="6" maxlength="8" required>
-<button class="primary" id="verifyEmailCode" type="submit">Verify email code</button>
-<button class="continue" id="resendEmailCode" type="button">Resend code</button>
-<button class="continue" id="cancelEmailCode" type="button">Back to sign in</button>
+<input id="emailCode" name="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" minlength="6" maxlength="8" placeholder="Enter your code" required>
+<button class="primary" id="verifyEmailCode" type="submit">Verify &amp; sign in</button>
+<button class="continue account-toggle" id="resendEmailCode" type="button" disabled>Resend code</button>
+<button class="continue account-toggle" id="changeEmail" type="button">Use a different email</button>
 </form>
-<button class="continue account-toggle" id="toggleAccount" type="button">Create account</button>
-<p class="auth-note">Sign in with your ClassSync email and password. No external account sign-in is needed.</p>
-<a class="continue" href="/student">Already signed in? Open your dashboard →</a>
-<div class="info">
-<b>Use your registered email.</b>
-<br>Your teacher registers your email and shares a one-time activation link. Use that link to choose your password.</div>
+<p id="accountStatus" role="status" aria-live="polite"></p>
+<p class="auth-note">We'll send a one-time verification code to your email. No password needed.</p>
+<div class="info">New here? Your student account is created after you verify your email. Check your inbox and spam folder for the code.</div>
 <footer class="entry-footer">
 <span>ClassSync · Attendance &amp; academic recovery</span>
 <a href="/login">Student &amp; teacher portals</a>
@@ -125,7 +112,7 @@
 </section>
 </div>
 </main>
-<script src="/account-login.js?v=email-codes-1">
+<script src="/account-login.js?v=otp-only-1">
 </script>
 </body>
 </html>

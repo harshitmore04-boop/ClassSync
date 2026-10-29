@@ -2138,7 +2138,6 @@ function compile(query, values2) {
     args.push(values2[Number(n) - 1]);
     return "$" + args.length + (cast || "");
   });
-  out = out.replace(/SET hits=hits\+1/gi, "SET hits=auth_attempts.hits+1");
   out = out.replace(/INSERT OR IGNORE INTO/gi, "INSERT INTO").replace(/\bMIN\(created_at,/gi, "LEAST(created_at,");
   if (/INSERT OR IGNORE INTO/i.test(query)) out += " ON CONFLICT DO NOTHING";
   return { query: out, values: args };
@@ -2207,11 +2206,6 @@ async function verifyEmailCode(email, code) {
   if (!value.access_token || !value.user?.email_confirmed_at || value.user.email?.toLowerCase() !== email) throw Error("Email could not be verified.");
   return value.access_token;
 }
-async function verifyEmailProof(email, token) {
-  if (typeof token !== "string" || token.length > 5e3 || !token) throw Error("Verify your email before creating the account.");
-  const user = await authCall("user", void 0, token);
-  if (!user.email_confirmed_at || user.email?.toLowerCase() !== email) throw Error("Verify the same email used for this account.");
-}
 
 // app/lib/trusted-proxy.ts
 async function proxyRequest(request) {
@@ -2236,15 +2230,6 @@ var encoder = new TextEncoder();
 var hex = (bytes) => Array.from(new Uint8Array(bytes)).map((b2) => b2.toString(16).padStart(2, "0")).join("");
 var digest = async (value) => hex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 var randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
-async function passwordHash(password, salt, iterations = 1e5) {
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  return hex(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: encoder.encode(salt), iterations, hash: "SHA-256" }, key, 256));
-}
-function equal(a, b2) {
-  let difference = a.length ^ b2.length;
-  for (let i = 0; i < Math.max(a.length, b2.length); i++) difference |= (a.charCodeAt(i) || 0) ^ (b2.charCodeAt(i) || 0);
-  return difference === 0;
-}
 function cookieToken(request) {
   return request.headers.get("cookie")?.split(";").map((s) => s.trim()).find((s) => s.startsWith(COOKIE + "="))?.slice(COOKIE.length + 1) || "";
 }
@@ -2282,13 +2267,40 @@ async function issueStudentInvite(studentId) {
 // app/api/auth/route.ts
 var dynamic = "force-dynamic";
 var reply = (body, status = 200, cookie) => Response.json(body, { status, headers: { "Cache-Control": "no-store", ...cookie ? { "Set-Cookie": cookie } : {} } });
+var denied = "Use your authorized teacher email or the student email registered on the class list, in the matching portal.";
+async function eligibleAccount(email, role) {
+  const existing = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
+  if (existing) return existing.role === role ? { existing, name: existing.name } : null;
+  if (role === "student") {
+    const student = await env.DB.prepare("SELECT name FROM students WHERE email=?").bind(email).first();
+    return student ? { existing: null, name: student.name } : null;
+  }
+  const authorized = String(env.CLASS_SYNC_TEACHER_EMAILS || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (!authorized.includes(email) || await env.DB.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()) return null;
+  return { existing: null, name: email.split("@")[0] };
+}
+async function activateAccount(email, role, eligible) {
+  if (eligible.existing) return eligible.existing;
+  const id = crypto.randomUUID();
+  const values2 = [id, email, eligible.name, role, randomToken(), randomToken(), 1e5, Date.now()];
+  if (role === "teacher") {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created,teacher_slot) SELECT ?,?,?,?,?,?,?,?,'classroom' WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE teacher_slot='classroom') ON CONFLICT(email) DO NOTHING").bind(...values2),
+      env.DB.prepare("INSERT INTO workspace (id,owner) SELECT 'classroom',id FROM accounts WHERE email=? AND role='teacher' AND teacher_slot='classroom' ON CONFLICT(id) DO UPDATE SET owner=excluded.owner").bind(email)
+    ]);
+  } else {
+    await env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM students WHERE email=?) ON CONFLICT(email) DO NOTHING").bind(...values2, email).run();
+  }
+  const account = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
+  if (!account || account.role !== role) throw Error("Your classroom access changed. Please contact your teacher.");
+  return account;
+}
 async function GET(request) {
   try {
     request = await proxyRequest(request);
     const user = await getAccountUser(request);
-    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, emailOtpEnabled: emailVerificationEnabled(), teacherSetupAvailable: !await env.DB.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first() });
-  } catch (error) {
-    console.error("ClassSync account service error:", error instanceof Error ? error.message : "unknown");
+    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, authMethod: "email_otp", emailOtpEnabled: emailVerificationEnabled() });
+  } catch {
     return reply({ error: "Account service unavailable." }, 503);
   }
 }
@@ -2298,101 +2310,45 @@ async function POST(request) {
     if (request.headers.get("origin") !== new URL(request.url).origin) return reply({ error: "Request origin rejected." }, 403);
     const raw = await request.text();
     if (raw.length > 6e3) return reply({ error: "Request too large." }, 413);
-    let b2;
+    let body;
     try {
-      b2 = JSON.parse(raw);
+      body = JSON.parse(raw);
     } catch {
       return reply({ error: "Send valid account details." }, 400);
     }
-    if (!b2 || typeof b2 !== "object") return reply({ error: "Send valid account details." }, 400);
-    if (b2.action === "logout") {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return reply({ error: "Send valid account details." }, 400);
+    if (body.action === "logout") {
       const token = cookieToken(request);
       if (token) await env.DB.prepare("DELETE FROM account_sessions WHERE token_hash=?").bind(await digest(token)).run();
       return reply({ ok: true }, 200, sessionCookie(request, "", 0));
     }
-    const email = String(b2.email || "").trim().toLowerCase(), password = String(b2.password || "");
-    if (["sendEmailCode", "verifyEmailCode"].includes(b2.action)) {
-      if (!emailVerificationEnabled()) return reply({ error: "Email verification is waiting for the email provider setup. You can still use your password." }, 503);
-      if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || !["student", "teacher"].includes(b2.role)) return reply({ error: "Enter your registered email and choose the correct portal." }, 400);
-      if (!await reserveAuthAttempt(request, email)) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
-      const existing = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
-      if (b2.action === "sendEmailCode") {
-        if (b2.registering) {
-          if (b2.role === "teacher") {
-            const setupHash = env.CLASS_SYNC_TEACHER_SETUP_HASH;
-            if (!setupHash || !equal(await digest(String(b2.setupCode || "")), setupHash) || await env.DB.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()) return reply({ error: "Use the private teacher setup code, or sign in to the existing teacher account." }, 403);
-          } else {
-            const invite = await env.DB.prepare("SELECT s.email FROM account_invites i JOIN students s ON s.id=i.student_id WHERE i.token_hash=? AND i.expires>?").bind(await digest(String(b2.invite || "")), Date.now()).first();
-            if (!invite || invite.email !== email) return reply({ error: "Use your teacher\u2019s valid invitation and its registered email." }, 403);
-          }
-        } else if (!existing || existing.role !== b2.role) return reply({ error: "Use an activated account in the matching portal." }, 403);
-        try {
-          await sendEmailCode(email);
-          return reply({ ok: true, message: "Check your email for the verification code." });
-        } catch (error) {
-          return reply({ error: error instanceof Error ? error.message : "Email delivery failed." }, 502);
-        }
-      }
+    if (!["sendEmailCode", "verifyEmailCode"].includes(body.action)) return reply({ error: "Use an email verification code to sign in." }, 400);
+    if (!emailVerificationEnabled()) return reply({ error: "Email sign-in is temporarily unavailable. Please try again shortly." }, 503);
+    const email = String(body.email || "").trim().toLowerCase(), role = body.role;
+    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || !["student", "teacher"].includes(role)) return reply({ error: "Enter your registered email and choose the correct portal." }, 400);
+    if (!await reserveAuthAttempt(request, email)) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
+    const eligible = await eligibleAccount(email, role);
+    if (!eligible) return reply({ error: denied }, 403);
+    if (body.action === "sendEmailCode") {
       try {
-        const proof = await verifyEmailCode(email, String(b2.code || ""));
-        if (b2.registering) return reply({ ok: true, emailProof: proof });
-        if (!existing || existing.role !== b2.role) return reply({ error: "Use an activated account in the matching portal." }, 403);
-        return reply({ ok: true, role: existing.role, redirect: existing.role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, existing.id));
+        await sendEmailCode(email);
+        return reply({ ok: true, message: "Check your email for the verification code.", resendAfter: 60 });
       } catch (error) {
-        return reply({ error: error instanceof Error ? error.message : "Unable to verify email." }, 400);
+        return reply({ error: error instanceof Error ? error.message : "Email delivery failed." }, 502);
       }
     }
-    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || password.length < 10 || password.length > 128) return reply({ error: "Use a valid email and a password of 10\u2013128 characters." }, 400);
-    const attempt = await reserveAuthAttempt(request, email);
-    if (!attempt) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
-    let account;
-    if (b2.action === "login") {
-      account = await env.DB.prepare("SELECT * FROM accounts WHERE email=?").bind(email).first();
-      const hash = await passwordHash(password, account?.salt || "classsync-dummy-password-salt", account?.iterations || 1e5);
-      if (!account || !equal(account.password_hash, hash)) return reply({ error: "Email or password is incorrect." }, 401);
-      if (b2.role && account.role !== b2.role) return reply({ error: "This account belongs to the other portal. Choose the matching role." }, 403);
-    } else if (b2.action === "register") {
-      if (emailVerificationEnabled()) {
-        try {
-          await verifyEmailProof(email, b2.emailProof);
-        } catch (error) {
-          return reply({ error: error instanceof Error ? error.message : "Verify your email first." }, 403);
-        }
-      }
-      const name = String(b2.name || "").trim();
-      if (!name || name.length > 60 || !["teacher", "student"].includes(b2.role)) return reply({ error: "Enter your name and a valid role." }, 400);
-      const salt = randomToken(), hash = await passwordHash(password, salt), id = crypto.randomUUID();
-      if (b2.role === "teacher") {
-        const setupHash = env.CLASS_SYNC_TEACHER_SETUP_HASH;
-        if (!setupHash || !equal(await digest(String(b2.setupCode || "")), setupHash)) return reply({ error: "A valid private teacher setup code is required." }, 403);
-        if (await env.DB.prepare("SELECT id FROM accounts WHERE teacher_slot='classroom'").first()) return reply({ error: "The teacher account is already configured. Sign in instead." }, 409);
-        try {
-          await env.DB.batch([
-            env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,teacher_slot,created) VALUES (?,?,?,?,?,?,?,?,?)").bind(id, email, name, "teacher", hash, salt, 1e5, "classroom", Date.now()),
-            env.DB.prepare("INSERT INTO workspace (id,owner) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner").bind("classroom", id)
-          ]);
-        } catch {
-          return reply({ error: "The teacher account or email is already registered." }, 409);
-        }
-        account = { id, email, name, role: "teacher" };
-      } else {
-        const tokenHash = await digest(String(b2.invite || ""));
-        const invite = await env.DB.prepare("SELECT i.*,s.email FROM account_invites i JOIN students s ON s.id=i.student_id WHERE i.token_hash=? AND i.expires>?").bind(tokenHash, Date.now()).first();
-        if (!invite || invite.email !== email) return reply({ error: "Use the unexpired invitation from your teacher and its registered email." }, 403);
-        const existing = await env.DB.prepare("SELECT id,role FROM accounts WHERE email=?").bind(email).first();
-        if (existing && existing.role !== "student") return reply({ error: "This email is already used by a teacher." }, 409);
-        const accountId = existing?.id || id;
-        const statements = [env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM account_invites WHERE token_hash=? AND expires>?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,password_hash=excluded.password_hash,salt=excluded.salt,iterations=excluded.iterations").bind(accountId, email, name, "student", hash, salt, 1e5, Date.now(), tokenHash, Date.now()), env.DB.prepare("DELETE FROM account_sessions WHERE account_id=? AND EXISTS (SELECT 1 FROM account_invites WHERE token_hash=? AND expires>?)").bind(accountId, tokenHash, Date.now()), env.DB.prepare("DELETE FROM account_invites WHERE token_hash=?").bind(tokenHash)];
-        const result = await env.DB.batch(statements);
-        if (!result[0].meta.changes) return reply({ error: "Invitation was already used. Request another from your teacher." }, 409);
-        account = { id: accountId, email, name, role: "student" };
-      }
-    } else return reply({ error: "Unknown account action." }, 400);
-    await env.DB.prepare("DELETE FROM auth_attempts WHERE id=?").bind(attempt).run();
+    try {
+      await verifyEmailCode(email, String(body.code || ""));
+    } catch (error) {
+      return reply({ error: error instanceof Error ? error.message : "Unable to verify email." }, 400);
+    }
+    const current2 = await eligibleAccount(email, role);
+    if (!current2) return reply({ error: denied }, 403);
+    const account = await activateAccount(email, role, current2);
     return reply({ ok: true, role: account.role, redirect: account.role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, account.id));
-  } catch (e) {
-    console.error("Account request failed", e instanceof Error ? e.name : "Error");
-    return reply({ error: "Unable to complete account request. Please retry." }, 503);
+  } catch (error) {
+    console.error("ClassSync email sign-in failed:", error instanceof Error ? error.name : "Error");
+    return reply({ error: "Unable to complete sign-in. Please retry." }, 503);
   }
 }
 
@@ -3020,7 +2976,6 @@ var dynamic3 = "force-dynamic";
 var reply2 = (body, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 async function GET4(request) {
   try {
-    request = await proxyRequest(request);
     const token = new URL(request.url).searchParams.get("session") || "";
     const policy = await env.DB.prepare("SELECT auth FROM sessions WHERE token=? AND mode=?").bind(token, "qr").first();
     if (policy?.auth === "direct") return GET3(request);
@@ -3037,7 +2992,6 @@ async function GET4(request) {
 }
 async function POST4(request) {
   try {
-    request = await proxyRequest(request);
     const cloned = request.clone();
     if (request.headers.get("origin") !== new URL(request.url).origin) return reply2({ error: "Request origin rejected." }, 403);
     const raw = await request.text();
@@ -3093,7 +3047,6 @@ function roster(s) {
 }
 async function GET5(request) {
   try {
-    request = await proxyRequest(request);
     const url = new URL(request.url), token = url.searchParams.get("session") || "", s = await getSession(token), receipt = url.searchParams.get("receipt");
     if (receipt) {
       const r = await env.DB.prepare("SELECT status FROM demo_qr_requests WHERE token=? AND receipt_hash=?").bind(token, await digest(receipt)).first();
@@ -3107,7 +3060,6 @@ async function GET5(request) {
 }
 async function POST5(request) {
   try {
-    request = await proxyRequest(request);
     if (request.headers.get("origin") !== new URL(request.url).origin) fail2("Request origin rejected.", 403);
     const raw = await request.text();
     if (raw.length > 24e3) fail2("Request too large.", 413);
@@ -3259,7 +3211,6 @@ async function current(link, studentId) {
 }
 async function GET6(request) {
   try {
-    request = await proxyRequest(request);
     const url = new URL(request.url), link = await linkFor(url.searchParams.get("enrollment") || "", false);
     if (link.scope === "live") {
       const u = await getAccountUser(request);
@@ -3289,7 +3240,6 @@ async function GET6(request) {
 }
 async function POST6(request) {
   try {
-    request = await proxyRequest(request);
     if (request.headers.get("origin") !== new URL(request.url).origin) fail3("Request origin rejected.", 403);
     const raw = await request.text();
     if (raw.length > 3e4) fail3("Request too large.", 413);

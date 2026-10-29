@@ -12,9 +12,11 @@ The interface and all five application API routes run on Vercel. Records are sto
 
 ## Configuration
 
-Set `DATABASE_URL` to the scoped application-role Supabase connection string in Vercel. `CLASS_SYNC_TEACHER_SETUP_HASH` protects first-teacher setup; the private setup code is stored in the owner's Vercel environment. Never commit environment values.
+Set `DATABASE_URL` to the scoped application-role Supabase connection string in Vercel. Student and teacher sign-in uses email OTP only. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_OTP_ENABLED=true`. Configure Brevo as the custom SMTP provider in Supabase Auth and use an email template containing `{{ .Token }}` so the message includes a verification code. No password, student invitation code, or private teacher setup code is required.
 
-Optional Supabase email codes use `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_OTP_ENABLED`. Email codes remain disabled until custom SMTP and code email templates are configured and tested. Password accounts remain available. Optional teacher email notifications use `BREVO_API_KEY` and `MAIL_FROM_EMAIL`.
+Existing teacher accounts retain access. `CLASS_SYNC_TEACHER_EMAILS` is a server-side comma-separated list of approved emails that can initialize the first teacher account; another email cannot take over an existing classroom. Students without an account are activated automatically after OTP verification when their email matches the teacher's class list. The browser cannot assign teacher privileges. Existing data and sessions remain intact. Brevo email notifications still optionally use `BREVO_API_KEY` and `MAIL_FROM_EMAIL`.
+
+Vercel runs `npm ci --prefix server && node server/build.mjs` before deployment to regenerate `api/proxy.js` from the backend source.
 
 ## Features
 

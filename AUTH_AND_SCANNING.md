@@ -2,15 +2,11 @@
 
 ## Real accounts
 
-Teacher and student pages now use ClassSync email/password forms. No ChatGPT sign-in link is shown or needed for application login. The hosted site must permit public visitors so anonymous QR check-in and account forms can load; live classroom data, approvals and management actions remain behind the application's server-side permissions.
+Teacher and student pages use email verification codes only. Supabase Auth verifies mailbox ownership using the configured custom SMTP service (Brevo). The email template must contain `{{ .Token }}`. No password, teacher setup code, or student invitation code is entered on either page. Legacy password login and registration API actions are rejected.
 
-The first teacher registers with a private, one-use setup code. Its SHA-256 hash is a server secret named `CLASS_SYNC_TEACHER_SETUP_HASH`. Only one teacher slot exists in this prototype, enforced by a database unique constraint. Teacher setup preserves existing classroom data while assigning classroom ownership to the new account. No student can become a teacher by changing the role selector or posting `role=teacher` without the setup code. The code ceases to authorize creation after that slot is taken. Never include the real code or a database in a public repository.
+An existing account keeps its stored role. A new student account is created only after successful OTP verification for an email already on the class list. First-teacher initialization requires that email to be present in the server's `CLASS_SYNC_TEACHER_EMAILS` setting; it cannot replace an existing classroom teacher. Selecting a portal or supplying provider user metadata cannot elevate privileges.
 
-After signing in, the teacher registers a student with their email. In the roster choose **Create / reset login**. Share the returned link privately with that student. It contains a random one-use invitation expiring in 24 hours. The student opens it, chooses a password, and activates their account using the registered email. The same process resets a student's password and revokes their old sessions. There is no email OTP, mailbox-verification service, automated invitation email, or teacher password-recovery flow in this version.
-
-Passwords are salted and derived with WebCrypto PBKDF2-SHA-256 (100,000 iterations); plaintext passwords are not saved. Session cookies are HttpOnly and SameSite=Lax, plus Secure on HTTPS. Only SHA-256 hashes of random session tokens are stored, with a seven-day expiry. Invites are also stored as token hashes. Same-origin POST checks, field limits, and per-email/IP attempt limits apply. The iteration count is a runtime-compatible prototype choice, not a claim of an independent security audit. A production institution should review authentication hardening, monitoring and account recovery.
-
-Sign out revokes the current server session and clears its cookie. **Switch portal** also signs out before returning to role selection. Demo entries remain isolated browser data and do not grant live teacher permissions. In demo mode both controls return to login without submitting live API requests.
+Session cookies remain HttpOnly, SameSite=Lax and Secure on HTTPS, with hashed server-side session tokens and a seven-day expiry. Same-origin requests, field limits, per-email/IP attempt limits and provider OTP expiry/replay protection remain in place. Changing email requests a new code, and the client enforces a 60-second resend cooldown. Backend authorization is checked again after email verification.
 
 ## QR attendance choices
 
@@ -58,7 +54,7 @@ npm install --prefix local-server
 node serve-local.mjs
 ```
 
-Open `http://localhost:8080/login`. The terminal shows your private **local teacher setup code** on first setup. Choose Teacher sign-in → First-time teacher setup, enter your own name/email/password and that code. The local database and code stay in ignored `.local/`. Do not upload that directory to GitHub. Reusing the same folder keeps your local records; deleting/moving `.local/` loses or disconnects those records.
+Open `http://localhost:8080/login`. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_OTP_ENABLED=true`, and `CLASS_SYNC_TEACHER_EMAILS` for local testing with your configured email provider. Use the teacher or student email OTP form. The local database stays in ignored `.local/`. Do not upload that directory to GitHub. Reusing the same folder keeps your local records; deleting/moving `.local/` loses or disconnects those records.
 
 The full server uses the same API route logic with a Node SQLite adapter. It is bound to localhost for one computer; it does not provide LAN access. Its connection comparison uses the loopback peer address, not a real classroom gateway. A phone scanning its localhost QR opens the phone's own localhost, so use the hosted URL for cross-device demonstrations.
 

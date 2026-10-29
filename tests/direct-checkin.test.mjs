@@ -1,3 +1,4 @@
+import {seedSession} from './account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLocalApplication} from '../serve-local.mjs';
@@ -7,7 +8,7 @@ async function fixture(requireIp=true){
   const r=await app.dispatch(new Request('https://class.test'+url,{method:body?'POST':'GET',headers:{Origin:'https://class.test','Content-Type':'application/json','cf-connecting-ip':ip,Cookie:cookie},...(body?{body:JSON.stringify(body)}:{})}));
   const result=await r.json();assert.equal(r.status,status,JSON.stringify(result));return {result,cookie:r.headers.get('set-cookie')?.split(';')[0]||''};
  }
- teacher=(await call('/api/auth',{action:'register',role:'teacher',name:'Teacher',email:'teacher@example.com',password:'test-teacher-password',setupCode:'test-only-code'})).cookie;
+ teacher=seedSession(app,{role:'teacher',email:'teacher@example.com',name:'Teacher'});
  await call('/api/attendance',{action:'student',name:'Harshit More',roll:'R1',email:'harshit@example.com'});
  const token=(await call('/api/attendance',{action:'session',subject:'COA',room:'B204',duration:180,mode:'qr',auth:'direct',requireIp})).result.token;
  return {...app,call,token};
@@ -29,7 +30,7 @@ test('mismatched name queues once, receipt reports status, only teacher can appr
  const queue=(await h.call('/api/attendance')).result.approvalRequests;assert.equal(queue.length,1);assert.equal(queue[0].registered_name,'Harshit More');assert.equal(queue[0].receipt_hash,undefined);
  await h.call('/api/attendance',{action:'reviewAttendance',requestId:queue[0].id,decision:'Approve'},{cookie:'',status:401});
  const student=h.sql.prepare('SELECT id FROM students').get();const invitation=(await h.call('/api/attendance',{action:'studentInvite',studentId:student.id})).result;
- const invite=new URL(invitation.inviteUrl).searchParams.get('invite');const signed=await h.call('/api/auth',{action:'register',role:'student',email:'harshit@example.com',name:'Harshit',password:'student-test-password',invite});
+ const signed={cookie:seedSession(h,{role:'student',email:'harshit@example.com',name:'Harshit'})};
  await h.call('/api/attendance',{action:'reviewAttendance',requestId:queue[0].id,decision:'Approve'},{cookie:signed.cookie,status:403});
  assert.deepEqual((await h.call('/api/attendance?portal=student',null,{cookie:signed.cookie})).result.approvalRequests,[]);
  await h.call('/api/checkin?session='+h.token+'&receipt=bad',null,{cookie:'',status:404});
