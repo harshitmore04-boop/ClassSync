@@ -89,10 +89,10 @@
 <p>Daily updates · Student insights · Messaging</p>
 </div>
 </div>
-<form id="accountForm">
+<div class="row" role="group" aria-label="Account access"><button type="button" class="continue" id="chooseSignIn" aria-pressed="true">Already have an account? Sign in</button><button type="button" class="continue" id="chooseCreate" aria-pressed="false">Create account</button></div><p id="accessMode" class="auth-note">Sign in with your email and a one-time code.</p><form id="accountForm">
 <label for="email">Email address</label>
 <input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="you@example.com" required>
-<div id="teacherRegistration" hidden><label for="teacherCode">Teacher registration code</label><input id="teacherCode" name="teacherCode" type="password" autocomplete="off" maxlength="128"><p class="auth-note">Required only when registering the first teacher account.</p></div>
+<div id="teacherRegistration" hidden><label for="teacherCode">Teacher registration code</label><input id="teacherCode" name="teacherCode" type="password" autocomplete="off" maxlength="128"><p class="auth-note">New teacher? Submit your email first, then enter your teacher registration code when asked.</p></div>
 <button class="primary" id="sendEmailCode" type="submit" disabled>Send verification code</button>
 </form>
 <form id="emailCodeForm" hidden>
@@ -105,7 +105,7 @@
 </form>
 <p id="accountStatus" role="status" aria-live="polite"></p>
 <p class="auth-note">We'll send a one-time verification code to your email. No account password needed.</p>
-<div class="info">Use the email linked to your authorized teacher account. Check your inbox and spam folder for the code.</div>
+<div class="info">Use any email address you can access. New teacher accounts also require the registration code. Check your inbox and spam folder for the code.</div>
 <footer class="entry-footer">
 <span>ClassSync · Attendance &amp; academic recovery</span>
 <a href="/login">Student &amp; teacher portals</a>
@@ -113,7 +113,7 @@
 </section>
 </div>
 </main>
-<script src="/account-login.js?v=otp-only-1">
+<script src="/account-login.js?v=account-options-3">
 </script>
 </body>
 </html>

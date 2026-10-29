@@ -89,8 +89,8 @@
 <p>Attendance · Recovery plans · Teacher messages</p>
 </div>
 </div>
-<form id="accountForm">
-<label for="email">Email address</label>
+<div class="row" role="group" aria-label="Account access"><button type="button" class="continue" id="chooseSignIn" aria-pressed="true">Already have an account? Sign in</button><button type="button" class="continue" id="chooseCreate" aria-pressed="false">Create account</button></div><p id="accessMode" class="auth-note">Sign in with your email and a one-time code.</p><form id="accountForm">
+<div id="studentRegistration" hidden><label for="studentName">Full name</label><input id="studentName" maxlength="60" autocomplete="name"><label for="studentRoll">USN / roll number</label><input id="studentRoll" maxlength="30" autocomplete="off"></div><label for="email">Email address</label>
 <input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="you@example.com" required>
 <button class="primary" id="sendEmailCode" type="submit" disabled>Send verification code</button>
 </form>
@@ -112,7 +112,7 @@
 </section>
 </div>
 </main>
-<script src="/account-login.js?v=otp-only-1">
+<script src="/account-login.js?v=account-options-3">
 </script>
 </body>
 </html>
