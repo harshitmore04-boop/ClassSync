@@ -24,7 +24,7 @@ export async function reserveAuthAttempt(request:Request,email:string){
  const db=env.DB!,now=Date.now(),bucket=Math.floor(now/900000),ip=request.headers.get('cf-connecting-ip')||'local';
  const keys=[{key:await digest('email:'+email+':'+bucket),limit:12},{key:await digest('ip:'+ip+':'+bucket),limit:100}];
  await db.prepare('DELETE FROM auth_attempts WHERE expires<?').bind(now).run();
- for(const entry of keys){await db.prepare('INSERT INTO auth_attempts (id,hits,expires) VALUES (?,1,?) ON CONFLICT(id) DO UPDATE SET hits=hits+1').bind(entry.key,(bucket+1)*900000).run();const row=await db.prepare('SELECT hits FROM auth_attempts WHERE id=?').bind(entry.key).first<any>();if(row.hits>entry.limit)return null;}
+ for(const entry of keys){await db.prepare('INSERT INTO auth_attempts (id,hits,expires) VALUES (?,1,?) ON CONFLICT(id) DO UPDATE SET hits=auth_attempts.hits+1').bind(entry.key,(bucket+1)*900000).run();const row=await db.prepare('SELECT hits FROM auth_attempts WHERE id=?').bind(entry.key).first<any>();if(row.hits>entry.limit)return null;}
  return keys[0].key;
 }
 export async function issueStudentInvite(studentId:string){
