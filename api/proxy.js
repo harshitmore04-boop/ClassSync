@@ -2181,32 +2181,6 @@ var env = new Proxy({ DB: database }, { get(target, key) {
   return key in target ? target[key] : process.env[key];
 } });
 
-// app/lib/email-verification.ts
-function emailVerificationEnabled() {
-  return env.SUPABASE_OTP_ENABLED === "true" && !!env.SUPABASE_URL && !!env.SUPABASE_PUBLISHABLE_KEY;
-}
-async function authCall(path, body, token) {
-  const settings = env, url = new URL(settings.SUPABASE_URL);
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".supabase.co")) throw Error("Email verification is not configured.");
-  const response = await fetch(new URL("/auth/v1/" + path, url), { method: body ? "POST" : "GET", headers: { apikey: settings.SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json", ...token ? { Authorization: "Bearer " + token } : {} }, ...body ? { body: JSON.stringify(body) } : {}, signal: AbortSignal.timeout(15e3) });
-  const value = await response.json();
-  if (!response.ok) {
-    if (response.status === 429) throw Error("Please wait before requesting another email code.");
-    if (path === "verify" || path === "user") throw Error("The verification code is invalid or expired. Request a new code.");
-    throw Error("Email delivery is unavailable. Ask the teacher to check email settings.");
-  }
-  return value;
-}
-async function sendEmailCode(email) {
-  await authCall("otp", { email, create_user: true });
-}
-async function verifyEmailCode(email, code) {
-  if (!/^\d{6,8}$/.test(code)) throw Error("Enter the verification code from your email.");
-  const value = await authCall("verify", { email, token: code, type: "email" });
-  if (!value.access_token || !value.user?.email_confirmed_at || value.user.email?.toLowerCase() !== email) throw Error("Email could not be verified.");
-  return value.access_token;
-}
-
 // app/lib/trusted-proxy.ts
 async function proxyRequest(request) {
   const signature = request.headers.get("x-classsync-proxy-signature");
@@ -2230,6 +2204,10 @@ var encoder = new TextEncoder();
 var hex = (bytes) => Array.from(new Uint8Array(bytes)).map((b2) => b2.toString(16).padStart(2, "0")).join("");
 var digest = async (value) => hex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 var randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
+async function passwordHash(password, salt, iterations = 1e5) {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  return hex(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: encoder.encode(salt), iterations, hash: "SHA-256" }, key, 256));
+}
 function equal(a, b2) {
   let difference = a.length ^ b2.length;
   for (let i = 0; i < Math.max(a.length, b2.length); i++) difference |= (a.charCodeAt(i) || 0) ^ (b2.charCodeAt(i) || 0);
@@ -2273,35 +2251,35 @@ async function issueStudentInvite(studentId) {
 var dynamic = "force-dynamic";
 var reply = (body, status = 200, cookie) => Response.json(body, { status, headers: { "Cache-Control": "no-store", ...cookie ? { "Set-Cookie": cookie } : {} } });
 var denied = "This email already belongs to a different portal. Use the matching student or teacher portal.";
+var ITERATIONS = 21e4;
 async function eligibleAccount(email, role) {
-  const existing = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
+  const existing = await env.DB.prepare("SELECT id,email,name,role,password_hash,salt,iterations FROM accounts WHERE email=?").bind(email).first();
   if (existing) return existing.role === role ? { existing, name: existing.name } : null;
   const student = role === "student" ? await env.DB.prepare("SELECT name FROM students WHERE email=?").bind(email).first() : null;
   return { existing: null, name: student?.name || email.split("@")[0] };
 }
-async function registrationAllowed(eligible, role, code) {
-  if (role !== "teacher" || eligible.existing) return true;
+async function registrationAllowed(role, code) {
+  if (role !== "teacher") return true;
   const hash = String(env.CLASS_SYNC_TEACHER_SETUP_HASH || "");
   return typeof code === "string" && code.length > 0 && code.length <= 128 && !!hash && equal(await digest(code), hash);
 }
-async function activateAccount(email, role, eligible, profile) {
-  if (eligible.existing) return eligible.existing;
-  const id = crypto.randomUUID();
-  const values2 = [id, email, eligible.name, role, randomToken(), randomToken(), 1e5, Date.now()];
+async function activateAccount(email, role, name, password, profile) {
+  const id = crypto.randomUUID(), salt = randomToken(), hash = await passwordHash(password, salt, ITERATIONS);
   const statements = [];
   if (role === "student" && profile) statements.push(env.DB.prepare("INSERT INTO students (id,name,roll,email,created_at,parent_email) VALUES (?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING").bind(crypto.randomUUID(), profile.name, profile.roll, email, Date.now(), ""));
-  statements.push(env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING").bind(...values2));
+  statements.push(env.DB.prepare("INSERT INTO accounts (id,email,name,role,password_hash,salt,iterations,created) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING").bind(id, email, name, role, hash, salt, ITERATIONS, Date.now()));
   await env.DB.batch(statements);
-  if (role === "teacher") await env.DB.prepare("INSERT INTO workspace (id,owner) SELECT 'classroom',id FROM accounts WHERE email=? AND role='teacher' ON CONFLICT(id) DO NOTHING").bind(email).run();
   const account = await env.DB.prepare("SELECT id,email,name,role FROM accounts WHERE email=?").bind(email).first();
-  if (!account || account.role !== role) throw Error("Your classroom access changed. Please contact your teacher.");
+  if (!account || account.id !== id) throw Error("An account with this email already exists. Choose Sign in.");
+  if (role === "teacher") await env.DB.prepare("INSERT INTO workspace (id,owner) VALUES ('classroom',?) ON CONFLICT(id) DO NOTHING").bind(id).run();
   return account;
 }
 async function GET(request) {
   try {
     request = await proxyRequest(request);
     const user = await getAccountUser(request);
-    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, authMethod: "email_otp", emailOtpEnabled: emailVerificationEnabled(), teacherSetupAvailable: false });
+    const old = user ? await env.DB.prepare("SELECT salt,iterations FROM accounts WHERE id=?").bind(user.userId).first() : null;
+    return reply({ user: user ? { email: user.email, name: user.displayName, role: user.role } : null, passwordSetupRequired: !!old && old.salt?.length === 64 && Number(old.iterations) === 1e5, authMethod: "password", teacherSetupAvailable: false });
   } catch {
     return reply({ error: "Account service unavailable." }, 503);
   }
@@ -2324,45 +2302,49 @@ async function POST(request) {
       if (token) await env.DB.prepare("DELETE FROM account_sessions WHERE token_hash=?").bind(await digest(token)).run();
       return reply({ ok: true }, 200, sessionCookie(request, "", 0));
     }
-    if (!["sendEmailCode", "verifyEmailCode"].includes(body.action)) return reply({ error: "Use an email verification code to sign in." }, 400);
-    if (!emailVerificationEnabled()) return reply({ error: "Email sign-in is temporarily unavailable. Please try again shortly." }, 503);
+    const password = body.password;
+    if (body.action === "setPassword") {
+      const user = await getAccountUser(request);
+      if (!user) return reply({ error: "Sign in with your existing session before setting a password." }, 401);
+      if (typeof password !== "string" || password.length < 8 || password.length > 128) return reply({ error: "Choose a password of 8 to 128 characters." }, 400);
+      if (!await reserveAuthAttempt(request, user.email)) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
+      const account2 = await env.DB.prepare("SELECT salt,iterations FROM accounts WHERE id=?").bind(user.userId).first();
+      if (!account2 || account2.salt?.length !== 64 || Number(account2.iterations) !== 1e5) return reply({ error: "This account already has a password. Sign in normally." }, 409);
+      const salt = randomToken(), hash = await passwordHash(password, salt, ITERATIONS);
+      const result = await env.DB.prepare("UPDATE accounts SET password_hash=?,salt=?,iterations=? WHERE id=? AND salt=? AND iterations=100000").bind(hash, salt, ITERATIONS, user.userId, account2.salt).run();
+      if (result.meta?.changes !== 1) return reply({ error: "Password was already set. Sign in normally." }, 409);
+      return reply({ ok: true, redirect: user.role === "teacher" ? "/teacher" : "/student" });
+    }
+    if (!["signin", "create"].includes(body.action)) return reply({ error: "Choose Sign in or Create account." }, 400);
     const email = String(body.email || "").trim().toLowerCase(), role = body.role;
     if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 150 || !["student", "teacher"].includes(role)) return reply({ error: "Enter a valid email address and choose a portal." }, 400);
+    if (typeof password !== "string" || password.length < 8 || password.length > 128) return reply({ error: "Enter a password of 8 to 128 characters." }, 400);
     if (!await reserveAuthAttempt(request, email)) return reply({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
     const eligible = await eligibleAccount(email, role);
     if (!eligible) return reply({ error: denied }, 403);
-    if (body.mode === "signin" && !eligible.existing) return reply({ error: "No account found. Choose Create account first." }, 404);
-    if (body.mode === "create" && eligible.existing) return reply({ error: "This account already exists. Choose Sign in." }, 409);
+    if (body.action === "signin") {
+      if (!eligible.existing) return reply({ error: "No account found. Choose Create account first." }, 404);
+      const current2 = eligible.existing;
+      if (current2.salt?.length === 64 && Number(current2.iterations) === 1e5) return reply({ error: "This older account needs a password. If you are still signed in on another tab, use Set password there. Otherwise ask your teacher for help." }, 409);
+      if (!current2.salt || !current2.password_hash || !Number.isInteger(Number(current2.iterations)) || Number(current2.iterations) < 1e5 || Number(current2.iterations) > 1e6) return reply({ error: "Account credentials are unavailable. Ask your teacher for help." }, 403);
+      if (!equal(await passwordHash(password, current2.salt, Number(current2.iterations)), current2.password_hash)) return reply({ error: "Incorrect email or password." }, 401);
+      return reply({ ok: true, role, redirect: role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, current2.id));
+    }
+    if (eligible.existing) return reply({ error: "This account already exists. Choose Sign in." }, 409);
     let profile;
-    if (body.mode === "create" && role === "student") {
+    if (role === "student") {
       const name = String(body.name || "").trim(), roll = String(body.roll || "").trim().toUpperCase();
       if (!name || name.length > 60 || !/^[A-Z0-9][A-Z0-9._/-]{0,29}$/.test(roll)) return reply({ error: "Enter your full name and valid USN / roll number." }, 400);
       const registered = await env.DB.prepare("SELECT email FROM students WHERE roll=?").bind(roll).first();
-      if (registered && registered.email !== email) return reply({ error: "This USN is already registered with another email. Ask your teacher to link your verified email; existing attendance is preserved." }, 409);
+      if (registered && registered.email !== email) return reply({ error: "This USN is already registered with another email. Ask your teacher to link your account; existing attendance is preserved." }, 409);
       profile = { name, roll };
       eligible.name = name;
     }
-    if (!await registrationAllowed(eligible, role, body.setupCode)) return reply({ error: "Enter the teacher registration code for your first sign-in.", needsTeacherCode: true }, 403);
-    if (body.action === "sendEmailCode") {
-      try {
-        await sendEmailCode(email);
-        return reply({ ok: true, message: "Check your email for the verification code.", resendAfter: 60 });
-      } catch (error) {
-        return reply({ error: error instanceof Error ? error.message : "Email delivery failed." }, 502);
-      }
-    }
-    try {
-      await verifyEmailCode(email, String(body.code || ""));
-    } catch (error) {
-      return reply({ error: error instanceof Error ? error.message : "Unable to verify email." }, 400);
-    }
-    const current2 = await eligibleAccount(email, role);
-    if (!current2) return reply({ error: denied }, 403);
-    if (!await registrationAllowed(current2, role, body.setupCode)) return reply({ error: "Enter the teacher registration code for your first sign-in.", needsTeacherCode: true }, 403);
-    const account = await activateAccount(email, role, { ...current2, name: profile?.name || current2.name }, profile);
-    return reply({ ok: true, role: account.role, redirect: account.role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, account.id));
+    if (!await registrationAllowed(role, body.setupCode)) return reply({ error: "Enter the teacher registration code to create your account.", needsTeacherCode: true }, 403);
+    const account = await activateAccount(email, role, eligible.name, password, profile);
+    return reply({ ok: true, role: account.role, redirect: role === "teacher" ? "/teacher" : "/student" }, 200, await createSession(request, account.id));
   } catch (error) {
-    console.error("ClassSync email sign-in failed:", error instanceof Error ? error.name : "Error");
+    console.error("ClassSync password sign-in failed:", error instanceof Error ? error.name : "Error");
     return reply({ error: "Unable to complete sign-in. Please retry." }, 503);
   }
 }
