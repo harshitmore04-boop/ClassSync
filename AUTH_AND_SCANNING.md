@@ -2,11 +2,11 @@
 
 ## Real accounts
 
-Teacher and student pages use email verification codes only. Supabase Auth verifies mailbox ownership using the configured custom SMTP service (Brevo). The email template must contain `{{ .Token }}`. Passwords and student invitation codes are not used. Any email can register after OTP verification. New teacher accounts additionally require the server-verified registration code; returning teachers use only email and OTP. Legacy password login and registration API actions are rejected.
+Teacher and student pages use email and password. New users set an 8–128 character password. The app stores a salted PBKDF2 hash, not the password. New teacher accounts also require the server-verified registration code; returning teachers use email and password. SMTP and Supabase Auth OTP are not part of this sign-in path.
 
-An existing account keeps its stored role. Any email can create a student account after OTP verification; registration alone does not enroll the student for attendance. Any email can create a teacher account after both OTP and the server-configured registration code are verified. Authorized teachers share the existing classroom; registration preserves its owner and data. Email allowlists are not used. Selecting a portal or supplying provider user metadata cannot elevate privileges.
+An existing account keeps its stored role. Any email can create a student account with full name and USN; teacher accounts need the server-configured registration code. Authorized teachers share the existing classroom; registration preserves its owner and data. Email allowlists are not used. The site does not verify mailbox ownership, so a school deployment should add a recovery/verification policy before using sensitive student data.
 
-Session cookies remain HttpOnly, SameSite=Lax and Secure on HTTPS, with hashed server-side session tokens and a seven-day expiry. Same-origin requests, field limits, per-email/IP attempt limits and provider OTP expiry/replay protection remain in place. Changing email requests a new code, and the client enforces a 60-second resend cooldown. Backend authorization is checked again after email verification.
+Session cookies remain HttpOnly, SameSite=Lax and Secure on HTTPS, with hashed server-side session tokens and a seven-day expiry. Same-origin requests, field limits and per-email/IP attempt limits remain in place. Existing OTP-only accounts can set a password through an active signed-in session. Without an active session, they require administrator-assisted recovery; the public form cannot claim an existing account by email alone.
 
 ## QR attendance choices
 
@@ -54,7 +54,7 @@ npm install --prefix local-server
 node serve-local.mjs
 ```
 
-Open `http://localhost:8080/login`. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_OTP_ENABLED=true`, and `CLASS_SYNC_TEACHER_EMAILS` for local testing with your configured email provider. Use the teacher or student email OTP form. The local database stays in ignored `.local/`. Do not upload that directory to GitHub. Reusing the same folder keeps your local records; deleting/moving `.local/` loses or disconnects those records.
+Open `http://localhost:8080/login`. Set `CLASS_SYNC_TEACHER_SETUP_HASH` to the SHA-256 digest of the teacher registration code. Use the teacher or student email and password form. The local database stays in ignored `.local/`. Do not upload that directory to GitHub. Reusing the same folder keeps your local records; deleting/moving `.local/` loses or disconnects those records.
 
 The full server uses the same API route logic with a Node SQLite adapter. It is bound to localhost for one computer; it does not provide LAN access. Its connection comparison uses the loopback peer address, not a real classroom gateway. A phone scanning its localhost QR opens the phone's own localhost, so use the hosted URL for cross-device demonstrations.
 

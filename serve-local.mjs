@@ -36,5 +36,5 @@ if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.m
   if(!response){res.writeHead(404);res.end('API not found.');return;}res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
  }catch(e){console.error('Local request failed:',e.message);res.writeHead(500,{'Content-Type':'text/plain'});res.end('Local service error. See terminal.')}});
  server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Port ${port} is busy. Try node serve-local.mjs ${port+1}`:e.message);app.close();process.exitCode=1});
- server.listen(port,'127.0.0.1',()=>{console.log(`ClassSync with real local accounts: http://localhost:${port}/login`);console.log('Email OTP requires SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, SUPABASE_OTP_ENABLED=true and a configured email provider. Set CLASS_SYNC_TEACHER_EMAILS for first teacher access.');console.log('Database stays in .local/. This launcher is single-computer only. Press Ctrl+C to stop.');});
+ server.listen(port,'127.0.0.1',()=>{console.log(`ClassSync with real local accounts: http://localhost:${port}/login`);console.log('Email and password sign-in is available locally. Set CLASS_SYNC_TEACHER_SETUP_HASH for first-time teacher registration.');console.log('Database stays in .local/. This launcher is single-computer only. Press Ctrl+C to stop.');});
 }
