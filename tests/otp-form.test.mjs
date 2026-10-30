@@ -3,54 +3,45 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
 const source=fs.readFileSync(new URL('../public/account-login.js',import.meta.url),'utf8');
-async function page({ready=true,role='student',teacherSetupAvailable=false,href='https://classsync.test/student-login'}={}){
+async function page({role='student',legacy=false,href='https://classsync.test/student-login'}={}){
  const elements=new Map();
- const node=id=>elements.get(id)||elements.set(id,{value:'',hidden:id==='emailCodeForm',disabled:id==='sendEmailCode',textContent:'',focus(){},setAttribute(){},reportValidity(){return true;},reset(){if(id==='emailCodeForm')node('emailCode').value='';}}).get(id);
- const requests=[],redirects=[];let failVerify=false,needTeacherCode=false;
- const context={document:{body:{dataset:{role}},getElementById:node},location:{href,origin:'https://classsync.test',pathname:'/student-login',assign:value=>redirects.push(value)},history:{replaceState(){}},URL,AbortSignal,Date,Math,Number,Error,setInterval(){return 1;},clearInterval(){},window:{addEventListener(){}},fetch:async(url,options={})=>{
-  if(options.method!=='POST')return Response.json({emailOtpEnabled:ready,teacherSetupAvailable});
-  const body=JSON.parse(options.body);requests.push(body);if(needTeacherCode&&body.action==='sendEmailCode'&&!body.setupCode)return Response.json({error:'Enter teacher registration code',needsTeacherCode:true},{status:403});
-  return failVerify&&body.action==='verifyEmailCode'?Response.json({error:'Code expired'},{status:400}):Response.json({ok:true,resendAfter:60});
+ const node=id=>elements.get(id)||elements.set(id,{value:'',hidden:id==='legacyPassword'||id==='confirmPasswordGroup'||id==='teacherRegistration'||id==='studentRegistration',disabled:false,textContent:'',focus(){},setAttribute(key,value){this[key]=value;},reportValidity(){return true;}}).get(id);
+ const requests=[],redirects=[];let fail=false;
+ const context={document:{body:{dataset:{role}},getElementById:node},location:{href,origin:'https://classsync.test',pathname:'/student-login',assign:value=>redirects.push(value)},history:{replaceState(){}},URL,AbortSignal,Error,window:{addEventListener(){}},fetch:async(url,options={})=>{
+  if(options.method!=='POST')return Response.json({authMethod:'password',user:legacy?{role,email:'old@account.test'}:null,passwordSetupRequired:legacy});
+  const body=JSON.parse(options.body);requests.push(body);
+  return fail?Response.json({error:'Incorrect email or password.'},{status:401}):Response.json({ok:true});
  }};
  vm.runInNewContext(source,context);await new Promise(setImmediate);
- return {node,requests,redirects,requireTeacherCode(){needTeacherCode=true;},failVerification(){failVerify=true;},async send(){node('accountForm').onsubmit({preventDefault(){}});await new Promise(setImmediate);},async verify(){await node('emailCodeForm').onsubmit({preventDefault(){}});}};
+ return {node,requests,redirects,fail(){fail=true;},async send(){await node('accountForm').onsubmit({preventDefault(){}});}};
 }
-test('email-only form binds verification to the sent email, prevents immediate resend, and preserves safe attendance return paths',async()=>{
+test('student password sign-in preserves safe attendance return path',async()=>{
  const p=await page({href:'https://classsync.test/student-login?returnTo=%2Fstudent%3Fsession%3Dclass-token'});
- assert.equal(p.node('sendEmailCode').disabled,false);
- p.node('email').value=' Student@Example.com ';await p.send();
- assert.deepEqual(p.requests,[{action:'sendEmailCode',email:'student@example.com',role:'student',mode:'signin'}]);
- assert.equal(p.node('accountForm').hidden,true);assert.equal(p.node('emailCodeForm').hidden,false);
- p.node('resendEmailCode').onclick();assert.equal(p.requests.length,1);
- p.node('email').value='different@example.com';p.node('emailCode').value='123456';await p.verify();
- assert.deepEqual(p.requests[1],{action:'verifyEmailCode',email:'student@example.com',role:'student',code:'123456',mode:'signin'});
+ p.node('email').value=' Student@Example.com ';p.node('password').value='password123';await p.send();
+ assert.deepEqual(p.requests,[{action:'signin',email:'student@example.com',password:'password123',role:'student'}]);
  assert.deepEqual(p.redirects,['/student?session=class-token']);
 });
-test('failed verification stays on the code form and changing email clears the pending code',async()=>{
- const p=await page({href:'https://classsync.test/student-login?returnTo=https%3A%2F%2Fevil.test'});
- p.node('email').value='student@example.com';await p.send();p.failVerification();p.node('emailCode').value='000000';await p.verify();
- assert.equal(p.node('accountStatus').textContent,'Code expired');assert.deepEqual(p.redirects,[]);
- p.node('changeEmail').onclick();assert.equal(p.node('emailCodeForm').hidden,true);assert.equal(p.node('emailCode').value,'');
- p.node('emailCode').value='123456';await p.verify();assert.equal(p.requests.length,2,'changing email invalidates the pending client challenge');
+test('creation collects student details and confirms matching password',async()=>{
+ const p=await page();p.node('chooseCreate').onclick();
+ assert.equal(p.node('confirmPasswordGroup').hidden,false);
+ p.node('studentName').value='Student';p.node('studentRoll').value='USN7';p.node('email').value='new@student.test';p.node('password').value='password123';p.node('confirmPassword').value='different';await p.send();
+ assert.equal(p.requests.length,0);assert.match(p.node('accountStatus').textContent,/do not match/);
+ p.node('confirmPassword').value='password123';await p.send();
+ assert.equal(p.requests[0].action,'create');assert.equal(p.requests[0].roll,'USN7');assert.equal(p.requests[0].name,'Student');
 });
-test('email delivery configuration must be ready before the send button is enabled',async()=>{
- const p=await page({ready:false});assert.equal(p.node('sendEmailCode').disabled,true);assert.match(p.node('accountStatus').textContent,/temporarily unavailable/);
+test('new teachers provide registration code; returning teachers use only password',async()=>{
+ const p=await page({role:'teacher'});p.node('chooseCreate').onclick();
+ assert.equal(p.node('teacherRegistration').hidden,false);assert.equal(p.node('teacherCode').required,true);
+ p.node('email').value='teacher@example.com';p.node('password').value='password123';p.node('confirmPassword').value='password123';p.node('teacherCode').value='JIAN23';await p.send();
+ assert.equal(p.requests[0].setupCode,'JIAN23');
+ const returning=await page({role:'teacher'});assert.equal(returning.node('teacherRegistration').hidden,true);
 });
-
-test('teacher registration code appears only during first setup and is retained through OTP verification',async()=>{
- const first=await page({role:'teacher',teacherSetupAvailable:true});
- assert.equal(first.node('teacherRegistration').hidden,false);assert.equal(first.node('teacherCode').required,true);
- first.node('email').value='teacher@example.com';first.node('teacherCode').value='test-code';await first.send();
- first.node('emailCode').value='123456';await first.verify();
- assert.equal(first.requests[0].setupCode,'test-code');assert.equal(first.requests[1].setupCode,'test-code');
- const returning=await page({role:'teacher'});assert.equal(returning.node('teacherRegistration').hidden,true);assert.equal(returning.node('teacherCode').required,false);
+test('signed-in legacy user can set a password for the same account',async()=>{
+ const p=await page({legacy:true});assert.equal(p.node('legacyPassword').hidden,false);
+ p.node('setPassword').onclick();p.node('password').value='password123';p.node('confirmPassword').value='password123';await p.send();
+ assert.deepEqual(p.requests,[{action:'setPassword',password:'password123'}]);
 });
-
-test('new teachers are prompted for code after email; existing teachers proceed without it',async()=>{
- const p=await page({role:'teacher'});p.requireTeacherCode();p.node('email').value='new@teacher.test';await p.send();
- assert.equal(p.node('teacherRegistration').hidden,false);assert.equal(p.node('teacherCode').required,true);assert.equal(p.node('emailCodeForm').hidden,true);
- p.node('teacherCode').value='registration-code';await p.send();assert.equal(p.requests[1].setupCode,'registration-code');assert.equal(p.node('emailCodeForm').hidden,false);
- p.node('changeEmail').onclick();assert.equal(p.node('teacherCode').required,false);assert.equal(p.node('teacherCode').value,'');
+test('failed login stays on form and rejects cross-origin return path',async()=>{
+ const p=await page({href:'https://classsync.test/student-login?returnTo=https%3A%2F%2Fevil.test'});p.fail();p.node('email').value='student@example.com';p.node('password').value='password123';await p.send();
+ assert.equal(p.node('accountStatus').textContent,'Incorrect email or password.');assert.deepEqual(p.redirects,[]);
 });
-
-test('create account collects student profile and preserves it until OTP verification',async()=>{const p=await page();p.node('chooseCreate').onclick();p.node('studentName').value='Student';p.node('studentRoll').value='USN7';p.node('email').value='new@student.test';await p.send();p.node('studentRoll').value='changed';p.node('emailCode').value='123456';await p.verify();assert.equal(p.requests[1].mode,'create');assert.equal(p.requests[1].roll,'USN7');assert.equal(p.requests[1].name,'Student');});
