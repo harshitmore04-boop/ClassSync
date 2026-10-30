@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#122c3c">
 <meta name="description" content="Sign in to ClassSync for attendance tracking, teacher updates and personalized learning recovery.">
 <title>Student sign in | ClassSync</title>
-<link rel="stylesheet" href="/signin.css?v=otp-only-1">
+<link rel="stylesheet" href="/signin.css?v=password-1">
 </head>
 <body data-role="student">
 <main class="page">
@@ -89,22 +89,18 @@
 <p>Attendance · Recovery plans · Teacher messages</p>
 </div>
 </div>
-<div class="row" role="group" aria-label="Account access"><button type="button" class="continue" id="chooseSignIn" aria-pressed="true">Already have an account? Sign in</button><button type="button" class="continue" id="chooseCreate" aria-pressed="false">Create account</button></div><p id="accessMode" class="auth-note">Sign in with your email and a one-time code.</p><form id="accountForm">
+<div class="row" role="group" aria-label="Account access"><button type="button" class="continue" id="chooseSignIn" aria-pressed="true">Already have an account? Sign in</button><button type="button" class="continue" id="chooseCreate" aria-pressed="false">Create account</button></div><p id="accessMode" class="auth-note">Sign in with your email and password.</p><form id="accountForm">
 <div id="studentRegistration" hidden><label for="studentName">Full name</label><input id="studentName" maxlength="60" autocomplete="name"><label for="studentRoll">USN / roll number</label><input id="studentRoll" maxlength="30" autocomplete="off"></div><label for="email">Email address</label>
 <input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="you@example.com" required>
-<button class="primary" id="sendEmailCode" type="submit" disabled>Send verification code</button>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+<div id="confirmPasswordGroup" hidden><label for="confirmPassword">Confirm password</label><input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128"></div>
+<button class="primary" id="accountSubmit" type="submit">Sign in</button>
 </form>
-<form id="emailCodeForm" hidden>
-<p class="entry-copy">Enter the code sent to <strong id="codeDestination"></strong>.</p>
-<label for="emailCode">Email verification code</label>
-<input id="emailCode" name="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" minlength="6" maxlength="8" placeholder="Enter your code" required>
-<button class="primary" id="verifyEmailCode" type="submit">Verify &amp; sign in</button>
-<button class="continue account-toggle" id="resendEmailCode" type="button" disabled>Resend code</button>
-<button class="continue account-toggle" id="changeEmail" type="button">Use a different email</button>
-</form>
+<div id="legacyPassword" hidden><p class="auth-note">You are signed in with an older account. Set a password to keep using it.</p><button type="button" class="continue account-toggle" id="setPassword">Set password for my account</button></div>
 <p id="accountStatus" role="status" aria-live="polite"></p>
-<p class="auth-note">We'll send a one-time verification code to your email. No password needed.</p>
-<div class="info">New here? Your student account is created after you verify your email. Check your inbox and spam folder for the code.</div>
+<p class="auth-note">Create an account with a password of at least 8 characters. No email code is needed.</p>
+<div class="info">New here? Choose Create account, add your full name and USN, and set a password. Your account can use real QR attendance and face enrollment after registration.</div>
 <footer class="entry-footer">
 <span>ClassSync · Attendance &amp; academic recovery</span>
 <a href="/login">Student &amp; teacher portals</a>
@@ -112,7 +108,7 @@
 </section>
 </div>
 </main>
-<script src="/account-login.js?v=account-options-3">
+<script src="/account-login.js?v=password-1">
 </script>
 </body>
 </html>
